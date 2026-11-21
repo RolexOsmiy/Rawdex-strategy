@@ -1,0 +1,181 @@
+:root{
+ color-scheme:dark;
+ --ivory:#f5e9d1;--quiet:#c7c5b3;--brass:#e4c18b;--rule:#9b845762;
+ --edge:#b29863;--raised:#253838;--shadow:0 14px 34px #06111188,0 2px 5px #0008;
+ --panel:linear-gradient(138deg,#203336fa,#142426fd 76%);
+ --front-ink:#101d1d;--front-line:#c8aa704d;--front-gold:#e5c797;
+ --front-serif:Georgia,"Times New Roman",serif;
+}
+
+/* The menu is its own surface so the game can paint behind the loading screen. */
+.front-shell{
+ position:fixed;inset:0;z-index:90;isolation:isolate;overflow:auto;overscroll-behavior:contain;
+ background:var(--front-ink);color:var(--ivory);scrollbar-color:#a0865e #142323;
+}
+.front-shell[hidden],.front-shell [hidden]{display:none}
+.front-art{position:fixed;inset:0;pointer-events:none;z-index:-2;background:center 53%/cover no-repeat url("ui/baltic-harbor.webp")}
+.front-art::after{
+ content:"";position:absolute;inset:0;
+ background:linear-gradient(90deg,#101d1dfb 0%,#101d1de9 18%,#101d1db9 35%,#101d1d20 73%),
+ linear-gradient(0deg,#101d1def,transparent 34%),linear-gradient(180deg,#101d1d80,transparent 25%);
+}
+.front-shell::after{content:"";position:fixed;inset:18px;z-index:-1;border:1px solid var(--front-line);pointer-events:none}
+.front-frame{
+ min-height:100dvh;width:min(100%,1450px);margin:0 auto;padding:clamp(38px,7vw,104px);
+ display:flex;flex-direction:column;justify-content:center;align-items:stretch;position:relative;
+}
+.front-brand{position:absolute;left:clamp(38px,7vw,104px);top:clamp(35px,6vh,76px);color:var(--front-gold)}
+.front-brand svg{display:block;stroke:currentColor;stroke-width:1.15}
+.front-language{position:absolute;right:clamp(38px,7vw,104px);top:clamp(35px,6vh,76px);display:flex;align-items:center;gap:9px;color:var(--front-gold);font:650 13px var(--copy)}
+.front-language select{min-height:38px;max-width:45vw;padding:5px 9px;border:1px solid #c9aa7280;border-radius:4px;background:#132323f2;color:var(--ivory);font:600 14px var(--copy)}
+.front-language select:focus-visible{outline:2px solid #f4d597;outline-offset:2px}
+.front-shell:not([data-screen='home'],[data-screen='maps']) .front-language{display:none}
+:root:lang(ja) .front-home h1,:root:lang(ko) .front-home h1,:root:lang(zh) .front-home h1{font-size:clamp(52px,8.2vw,112px);line-height:1;letter-spacing:-.045em}
+.front-page{width:min(100%,600px);margin-block:34px 0}
+.front-page h2,.front-page h1{font-family:var(--front-serif);font-weight:400;margin:0;color:#fff1d5;text-wrap:balance}
+.front-page h2{font-size:clamp(36px,6vw,70px);line-height:1.02;letter-spacing:-.035em}
+.front-page p{font:400 clamp(14px,1.5vw,16px)/1.55 var(--copy);color:#d2cfba}
+.front-home h1{font-size:clamp(62px,9.2vw,146px);line-height:.84;letter-spacing:-.075em;text-shadow:0 7px 44px #0a1514ad}
+.front-home .front-era{display:flex;align-items:center;gap:11px;margin:0 0 19px;font:700 12px/1.3 var(--copy);letter-spacing:.13em;text-transform:uppercase;color:var(--front-gold)}
+.front-era span{width:22px;height:1px;background:#caa06d87}
+.front-actions{display:grid;gap:9px;width:min(100%,282px);margin-top:35px}
+.front-button,.setup-start{
+ appearance:none;min-height:49px;display:flex;align-items:center;justify-content:center;padding:10px 17px;
+ border-radius:3px;text-decoration:none;border:1px solid var(--edge);text-align:center;font:700 15px/1.3 var(--copy);
+ transition:background .16s,color .16s,border-color .16s;
+}
+.front-primary,.setup-start:not(:disabled){background:linear-gradient(#eed3a2,#cda370);color:#221a11;box-shadow:0 4px 18px #070c0b8a}
+.front-primary:hover,.setup-start:not(:disabled):hover{background:#f5ddad;border-color:#f9e7c4;color:#17140d}
+.front-secondary{color:#eee2c7;background:#152524cb;border-color:#c9aa7265}
+.front-secondary:hover{background:#2c3d35;border-color:var(--front-gold)}
+.front-back,.setup-back{
+ display:inline-flex;align-items:center;width:max-content;padding:5px 0;margin-bottom:15px;border:0;
+ background:none;color:var(--front-gold);font:650 13px/1.25 var(--copy);text-decoration:underline;text-underline-offset:4px;
+}
+.front-back:hover,.setup-back:hover{color:#fff0cf}
+.front-shell :is(button,a):focus-visible,#app :is(button,a,summary,input,select,[tabindex='0']):focus-visible{
+ outline:2px solid #f4d597;outline-offset:3px;
+}
+.front-shell :is(h2,section)[tabindex='-1']:focus,#setup-heading:focus{outline:none}
+.front-shell:is([data-screen='maps'],[data-screen='help']) .front-art::after{
+ background:linear-gradient(90deg,#0f1b1cf7,#0f1b1ccc 54%,#0f1b1c76),linear-gradient(0deg,#0d1819,transparent 42%);
+}
+.front-maps{width:min(100%,1050px);margin-inline:auto}
+.front-map-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:25px}
+.front-map{
+ position:relative;display:flex;align-items:flex-end;min-height:clamp(200px,29vw,335px);overflow:hidden;
+ padding:0;border:1px solid #c8a77386;border-radius:5px;text-decoration:none;color:var(--ivory);
+ background:#223f43 center/cover no-repeat;box-shadow:0 12px 24px #0006;
+ transition:border-color .18s,box-shadow .18s;
+}
+.front-map-baltic{background-image:linear-gradient(0deg,#0e1b1bf9,transparent 73%),url("maps/atlas/baltic.webp")}
+.front-map-med{background-image:linear-gradient(0deg,#0e1b1bf9,transparent 73%),url("maps/atlas/mediterranean.webp")}
+.front-map:hover,.front-map:focus-visible{border-color:#ffe2a9;box-shadow:0 0 0 1px #eac48e69,0 14px 24px #000a}
+.front-map-text{display:grid;gap:6px;padding:clamp(15px,2vw,25px);text-shadow:0 2px 7px #000b}
+.front-map strong{font:400 clamp(23px,3.4vw,42px)/1.05 var(--front-serif);letter-spacing:-.03em}
+.front-map small{font:500 clamp(13px,1.25vw,15px)/1.42 var(--copy);color:#dfdbc9}
+
+.front-shell:is([data-screen='loading'],[data-screen='error']) .front-frame{align-items:center}
+.front-shell:is([data-screen='loading'],[data-screen='error']) .front-brand{left:50%;translate:-50% 0}
+.front-shell:is([data-screen='loading'],[data-screen='error']) .front-art{
+ background-image:url("maps/atlas/baltic.webp");background-position:50% 46%;
+}
+[data-scenario='mediterranean'] .front-shell:is([data-screen='loading'],[data-screen='error']) .front-art{
+ background-image:url("maps/atlas/mediterranean.webp");
+}
+.front-shell:is([data-screen='loading'],[data-screen='error']) .front-art::after{
+ background:radial-gradient(ellipse at center,#132122b5 0%,#101d1def 100%),linear-gradient(0deg,#0d1718,transparent 66%);
+}
+.front-load{text-align:center;text-shadow:0 3px 16px #0009}
+.front-load .front-actions{margin-inline:auto}
+.front-progress{display:flex;align-items:center;gap:13px;margin:23px auto 0;width:min(100%,398px)}
+.front-progress progress{
+ appearance:none;flex:1;min-width:0;height:7px;border:0;border-radius:9px;overflow:hidden;background:#273a37;accent-color:#e8c383;
+}
+.front-progress progress::-webkit-progress-bar{background:#273a37}
+.front-progress progress::-webkit-progress-value{background:linear-gradient(90deg,#a57d4e,#f1cea0)}
+.front-progress progress::-moz-progress-bar{background:linear-gradient(90deg,#a57d4e,#f1cea0)}
+.front-progress output{min-width:42px;text-align:right;color:#f6d4a5;font:700 13px var(--copy);font-variant-numeric:tabular-nums}
+.front-shell:is([data-screen='pause'],[data-screen='exit']){background:#111d1df0}
+.front-shell:is([data-screen='pause'],[data-screen='exit']) .front-art{opacity:.36}
+.front-pause{margin-inline:auto;text-align:center}
+.front-pause .front-actions{margin-inline:auto}
+.front-help{margin-inline:auto}
+.front-help dl{margin:22px 0 0;border-top:1px solid var(--front-line);font:500 15px/1.35 var(--copy)}
+.front-help dl div{display:grid;grid-template-columns:1fr 1fr;gap:9px;padding:9px 0;border-bottom:1px solid var(--front-line)}
+.front-help dt{color:#f9edcf}
+.front-help dd{margin:0;color:#cccfbe;text-align:right}
+.front-help kbd{display:inline-block;padding:1px 5px;border:1px solid #a58c5d71;border-radius:3px;color:#f8d9a6;background:#263534;font:700 12px/1.3 var(--copy)}
+.front-noscript{position:fixed;bottom:32px;z-index:99;color:#fff4d8;width:100%;text-align:center}
+
+/* Campaign setup and game surfaces share the same material and control states. */
+#app .intro{
+ width:min(385px,calc(100% - 40px));left:20px;bottom:20px;padding:16px 17px 17px;border-radius:8px;
+ border-color:#c2a271a0;background:linear-gradient(147deg,#223535f7,#122424fb);max-height:calc(100dvh - 40px);
+ scrollbar-width:thin;scrollbar-color:#9e845c #192e2d;
+}
+.setup-heading-row{display:flex;align-items:flex-start;justify-content:space-between;gap:9px;margin-bottom:12px}
+.setup-heading-row .setup-scenario{margin:0 0 5px;text-transform:uppercase;letter-spacing:.07em;font:700 11px/1.2 var(--copy);color:#e8c58e}
+.setup-heading-row h1{margin:0!important;font-size:clamp(21px,2.15vw,30px);letter-spacing:-.035em}
+.setup-back{margin:1px 0 0;padding:5px 6px;line-height:1}
+.campaign-starts{gap:5px;margin:9px 0 10px}
+.campaign-starts button{min-height:49px;font-family:var(--copy);text-align:left;border-color:#a187556a;background:#1a2d2c;border-radius:5px}
+.campaign-starts button[aria-pressed='true']{border-color:#ebc68b;background:#625035;color:#fff1d1}
+.campaign-starts strong{font-size:16px}
+.campaign-starts span{color:#d5d1bd}
+.setup-all{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:9px;font:600 12px/1.3 var(--copy);color:#e1d6bd}
+.setup-all select{width:100%;min-height:33px;border-radius:4px;border:1px solid #9f865d87;background:#172b2b;color:#f5ead1;padding:3px 6px;font:600 13px var(--copy)}
+#scenario-intro{margin:9px 0 7px;color:#ded5c0;font-size:13px}
+.setup-start{width:100%;min-height:41px;margin:0;padding:6px 10px}
+.setup-start:disabled{background:#233434;color:#b5bcad;border-color:#767d68;cursor:default}
+.start-settlement .map-ribbon{background:#362c1d!important;border-color:#f4d296!important;color:#fff1cd;box-shadow:0 0 0 2px #e5ba6c82,0 3px 14px #091512b8}
+.start-settlement .map-crest{outline:1px solid #f4ce8e;outline-offset:2px}
+
+header{background:linear-gradient(180deg,#263333fa,#152626fa 88%);border-color:#b294605e}
+header button.subtle,header .notifications-toggle,.footer,.tool,#muster-toggle{border-color:#a98a6274}
+header .game-menu-toggle{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:30px}
+header .game-menu-toggle span:first-child{font-size:14px;line-height:1;color:#e9ca95}
+header .domain-shortcut{text-align:left;border:0;border-left:1px solid #a2875b50;background:none;align-self:stretch}
+header .domain-shortcut:hover,header .domain-shortcut[aria-expanded='true']{background:#755c353d}
+.resource-values .resource-name,.resource-values em,.trade-fleet small{color:#d4c8b0}
+.resource-values b,.game-date,#money{font-variant-numeric:tabular-nums}
+.atlas-vignette{background:radial-gradient(ellipse at 50% 46%,transparent 60%,#09171655 100%)}
+#app :is(.duchy-card,.building-detail,.muster-panel,.cargo-inspector,.realm-overview,.notifications-panel,#council-panel,.campaign-panel,.border-dialog,.defeat,.campaign-finale){
+ background:var(--panel);border-color:#b49a666c;box-shadow:var(--shadow);scrollbar-width:thin;scrollbar-color:#927853 #172b2a;
+}
+.duchy-hero{border-bottom-color:#a88a5877}
+#app :is(.duchy-block,.council-task,.realm-overview-row,.realm-filters button,.notification-item,.campaign-path){border-color:#a48a5f55}
+#app :is(.duchy-action,.council-action,.campaign-secondary button,.realm-filters button):not(:disabled):hover{border-color:#e0bc83}
+#app .duchy-action:disabled{opacity:.86}
+#app :is(.duchy-tabs button,.realm-filters button,.council-task-options button)[aria-selected='true'],
+#app :is(.realm-filters button,.council-task-options button)[aria-pressed='true']{background:#56452d;border-color:#d1ac6e;color:#fff0d3}
+#app .tool.unaffordable{opacity:.72}
+#app :is(.action-tooltip,.notice-tooltip,.tool-tip,.slot-tip,.cargo-tip){background:#1b2c2b;color:#f4ead6;border-color:#b79a67}
+#app .highlighted .map-ribbon,#app .focused-settlement .map-ribbon{border-color:#edd19a}
+.duchy-card .duchy-tabs button,.realm-filters button{min-height:34px}
+.notifications-heading,.realm-overview-heading,.campaign-heading{border-bottom-color:#a88b5d66}
+
+@media(max-height:650px){
+ .front-frame{padding-top:70px;padding-bottom:36px}
+ .front-brand{top:24px}.front-brand svg{width:34px;height:34px}
+ .front-page{margin-top:16px}
+ .front-actions{margin-top:22px}
+}
+@media(max-width:700px){
+ .front-shell::after{inset:8px}
+ .front-frame{padding:72px 23px 32px}
+ .front-brand{top:23px;left:23px}.front-brand svg{width:36px;height:36px}
+ .front-language{top:23px;right:23px}
+ .front-art{background-position:60% center}
+ .front-art::after{background:linear-gradient(0deg,#101d1dfc 4%,#101d1dc0 43%,#101d1d4a 100%),linear-gradient(90deg,#10201fde,#101d1d04)}
+ .front-home h1{font-size:clamp(46px,12.7vw,100px)}
+ .front-map-grid{grid-template-columns:1fr;gap:9px;margin-top:17px}
+ .front-map{min-height:143px;background-position:50% 67%}
+ .front-map-text{gap:3px}
+ #app .intro{left:8px;bottom:8px;width:min(380px,calc(100% - 16px));max-height:min(58dvh,475px);padding:11px 12px}
+ .setup-heading-row{margin-bottom:7px}
+ .campaign-starts button{min-height:44px}
+ header .game-menu-toggle span:nth-child(2){display:none}
+}
+@media(max-width:390px){.front-help dl div{grid-template-columns:1fr;gap:2px}.front-help dd{text-align:left}.front-home .front-era{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.front-map,.front-button,.setup-start{transition:none}}
