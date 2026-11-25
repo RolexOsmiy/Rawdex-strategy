@@ -245,6 +245,27 @@ aside.duchy-card,.building-detail,.muster-panel,.cargo-inspector,.object-chooser
 .game-date{bottom:14px;right:14px;padding:7px 10px}
 .camera-help{bottom:53px;right:14px;align-items:center;gap:4px}
 .camera-help button{display:grid;place-items:center;width:46px;height:46px;padding:0;border:1px solid var(--rule);border-radius:50%;background:#14252fe8;color:var(--brass)}
+.fps-meter{position:absolute;top:56px;right:14px;z-index:5;padding:3px 8px;border:1px solid var(--rule);border-radius:6px;background:var(--panel);color:var(--ivory);font:10px/1.2 Arial,sans-serif;letter-spacing:.5px;pointer-events:none}.fps-meter[hidden]{display:none}.fps-meter[data-rate=low]{color:#ff9d7a;border-color:#a05c44}.fps-meter[data-rate=mid]{color:#e9d49a}.fps-meter[data-rate=ok]{color:#9fd6a8}
+.settings-panel{position:absolute;right:14px;bottom:118px;z-index:8;width:min(300px,86vw);padding:10px 12px;display:flex;flex-direction:column;gap:7px;background:var(--panel);border:1px solid var(--rule);border-radius:8px;color:var(--ivory);font-family:var(--copy);box-shadow:0 4px 14px #000a}.settings-panel[hidden]{display:none}
+.settings-panel .notifications-heading{margin:0 0 2px}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font:11px/1.3 Arial,sans-serif}
+#front-quit[hidden]{display:none}
+.slot-marker[hidden],.army-selection[hidden]{display:none}
+.army-selection{position:absolute;right:116px;bottom:116px;z-index:7;width:min(290px,40vw);padding:10px 12px;background:var(--panel);color:var(--ivory);border:1px solid var(--rule);border-radius:8px;box-shadow:0 4px 14px #0009;font:12px/1.4 var(--copy)}
+.army-selection .notifications-heading{margin:0}
+#army-selection-total{margin:5px 0;color:var(--brass);font-variant-numeric:tabular-nums}
+#army-selection-list{list-style:none;display:grid;gap:3px;max-height:min(25dvh,210px);overflow:auto;padding:0;margin:0 0 6px}
+.army-selection-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:6px;width:100%;padding:4px 6px;text-align:left;font:inherit;color:inherit;background:#253637;border:1px solid #586459;border-radius:4px;cursor:pointer}
+.army-selection-row:hover,.army-selection-row:focus-visible{border-color:var(--brass)}
+.army-selection-icon{display:grid;place-items:center;height:22px;color:var(--brass);border:1px solid var(--rule);border-radius:3px}
+.army-selection-row b{font-variant-numeric:tabular-nums}
+.army-selection small{display:block;color:#b9c4b3}
+.setting-control{flex:none}
+.setting-row input[type=checkbox]{width:15px;height:15px;accent-color:#c9a53f}
+.setting-row select{background:#101a1b;color:#e7d8a6;border:1px solid #8c805e;border-radius:4px;padding:3px 5px;font:11px Arial,sans-serif}
+.settings-note{font:10px/1.35 Arial,sans-serif;color:#c9b98a}
+#settings-gpu-info{color:#9aa79b}
+.settings-reset{margin-top:2px;padding:6px 10px;align-self:flex-start;background:#1c2522;border:1px solid #8c805e;border-radius:5px;color:#e7d8a6;font:11px Georgia,serif;cursor:pointer}.settings-reset:hover{outline:1px solid #e9d49a}
 #atlas-needle{display:block;width:40px;height:40px}
 #atlas-scale{font:600 10px/1 var(--copy);color:var(--ivory)}
 
@@ -813,13 +834,34 @@ header .resource-switch[aria-pressed=false]::after{
 header .resource-bar .resource-label{display:none}
 header button.subtle,header .notifications-toggle{border-color:#947654;background:#32261cd9;color:#f6e6c9}
 header button.subtle:hover,header .notifications-toggle:hover{background:#624929;border-color:#c39c62}
+.victory-rings{display:flex;align-items:center;gap:4px;flex:none;margin-left:3px}
+.victory-rings[hidden]{display:none}
+.victory-ring{
+ width:32px;height:32px;display:grid;place-items:center;flex:none;padding:3px;
+ border:1px solid var(--victory-color,#9b8e77);border-radius:50%;cursor:pointer;
+ background:conic-gradient(var(--victory-color,#9b8e77) var(--victory-progress,0%),#252b2b 0);
+ color:var(--ivory);box-shadow:0 1px 3px #0009;
+}
+.victory-ring:hover .victory-icon,.victory-ring:focus-visible .victory-icon{background:#50432e}
+.victory-icon{
+ display:grid;place-items:center;width:100%;height:100%;
+ border-radius:50%;background:#202b2a;font:16px/1 Georgia,serif;
+}
+.victory-icon svg{width:17px;height:17px}
+@media(min-width:881px){
+ header .resource-bar{flex:0 1 auto;overflow-x:auto}
+}
+@media(max-width:520px){
+ .victory-ring{width:28px;height:28px}
+ .victory-rings{gap:3px;margin-left:0}
+}
 .campaign-secondary{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--rule)}
 .campaign-secondary button{
  padding:5px 7px;color:#e3d2af;background:#283535;border:1px solid #7b755a;border-radius:5px;
  font:600 12px var(--copy);
 }
 .campaign-setup>header,.campaign-setup>.footer,.campaign-setup>.camera-help,.campaign-setup>#game-date,
- .campaign-setup>#traffic-legend,.campaign-setup>#notice-strip{display:none!important}
+ .campaign-setup>#traffic-legend,.campaign-setup>#notice-strip,.campaign-setup>#fps-meter{display:none!important}
 .intro h2{margin:12px 0 4px;color:#eeddba;font:650 17px/1.2 var(--display)}
 #scenario-intro{color:#d3ddcd;margin:5px 0 0;font-size:13px}
 .action-tooltip{
@@ -871,3 +913,27 @@ header button.subtle:hover,header .notifications-toggle:hover{background:#624929
 .war-panel .peace-tools button:not(:disabled){background:#304c45;border-color:#789684}
 .war-panel .peace-tools button:not(:disabled):hover{background:#42685a}
 .peace-treaty-status{color:#dfcc9f}
+
+.duchy-card-crest .heraldry,.crest .heraldry,.map-crest .heraldry{filter:drop-shadow(0 2px 3px #000c)}
+
+.map-label-line{display:flex;flex-direction:row;align-items:center;gap:5px}
+.map-body{display:flex;flex-direction:column;gap:2px;align-items:center;min-width:0}
+.map-crest-heraldry{display:inline-block;flex:none;line-height:0;filter:drop-shadow(0 2px 2px #080b08)}
+.map-crest-heraldry svg{display:block}
+.map-crest-heraldry.crest-neutral{opacity:.66}
+.realm-overview-row strong{display:flex;align-items:center;gap:7px}
+.realm-overview-row strong .heraldry{flex:none;filter:drop-shadow(0 1px 1px #000a)}
+#muster-list button{display:flex;align-items:center;gap:8px}
+#muster-list button .heraldry{flex:none;filter:drop-shadow(0 1px 1px #000a)}
+.campaign-starts button strong{display:flex;align-items:center;gap:8px}
+.campaign-starts button strong .heraldry{flex:none;filter:drop-shadow(0 1px 1px #000a)}
+
+.council-vassals{padding:4px 2px}
+.council-vassals-list{max-height:46vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#8a7857 #17292b}
+.council-vassals-list .realm-overview-row{margin:3px 0}
+.council-vassals-list .realm-overview-row strong{display:flex;align-items:center;gap:7px}
+.council-vassals-list .realm-overview-row .heraldry{flex:none;filter:drop-shadow(0 1px 1px #000a)}
+.advisor-vassals{--advisor-field:#5d5340;--advisor-edge:#d9c9a2}
+
+.vassal-border-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#labels{z-index:3}

@@ -23,7 +23,22 @@ function makeTransport(regions){
  for(const r of regions)for(const id of r.adj){if(id<=r.id)continue;let a=anchors.get(r.id),b=anchors.get(id);if(!a||!b)continue;let path=astar(a,b);if(!path)continue;for(let i=0;i<path.length;i++){let k='g'+nodeKey(path[i].x,path[i].z);graphAddNode(g,k,{x:path[i].x*ROAD_STEP,z:path[i].z*ROAD_STEP});if(i)graphLink(g,'g'+nodeKey(path[i-1].x,path[i-1].z),k)}}
  return g;
 }
-function networkPath(g,from,to,canTraverse=null){if(!g.nodes.has(from)||!g.nodes.has(to))return null;let open=[],cost=new Map([[from,0]]),came=new Map(),closed=new Set();heapPushRoad(open,{id:from,f:0});while(open.length){let cur=heapPopRoad(open),id=cur.id;if(closed.has(id))continue;if(id===to){let out=[];for(let k=id;k;k=came.get(k)){let n=g.nodes.get(k);out.push({x:n.x,z:n.z})}return out.reverse()}closed.add(id);for(let [next,w] of g.nodes.get(id).edges){if(canTraverse&&!canTraverse(g.nodes.get(id),g.nodes.get(next)))continue;let d=cost.get(id)+w;if(d>=(cost.get(next)??Infinity))continue;cost.set(next,d);came.set(next,id);heapPushRoad(open,{id:next,f:d})}}return null}
+function networkPath(g,from,to,canTraverse=null){
+ if(!g.nodes.has(from)||!g.nodes.has(to))return null;
+ // Мемоизация: боты и караваны спрашивают одни и те же маршруты десятки раз,
+ // а Дейкстра по всей дорожной сети — миллисекунды на запрос. Ключ включает
+ // сам фильтр (замыкание), поэтому при войне/мире маршруты честно считаются
+ // заново. Кэш ограничен и сбрасывается при изменении графа (attachCity).
+ const cache=g._pathCache??(g._pathCache=new Map());
+ const key=(canTraverse??'open')+':'+from+':'+to;
+ if(cache.has(key))return cache.get(key);
+ let open=[],cost=new Map([[from,0]]),came=new Map(),closed=new Set(),result=null;
+ heapPushRoad(open,{id:from,f:0});
+ while(open.length){let cur=heapPopRoad(open),id=cur.id;if(closed.has(id))continue;if(id===to){let out=[];for(let k=id;k;k=came.get(k)){let n=g.nodes.get(k);out.push({x:n.x,z:n.z})}result=out.reverse();break}closed.add(id);for(let [next,w] of g.nodes.get(id).edges){if(canTraverse&&!canTraverse(g.nodes.get(id),g.nodes.get(next)))continue;let d=cost.get(id)+w;if(d>=(cost.get(next)??Infinity))continue;cost.set(next,d);came.set(next,id);heapPushRoad(open,{id:next,f:d})}}
+ cache.set(key,result);
+ if(cache.size>8000)cache.clear();
+ return result;
+}
 function localRoadNodes(g,region){
  const cache=g.localRoadNodes??=new Map();
  let data=cache.get(region);
@@ -78,34 +93,78 @@ function routeToHub(g,from,hub,canTraverse=null){
  return path;
 }
 function attachBuilding(g,region,building,capitalId,canTraverse=null){
- const hub=g.hubKeys.get(capitalId),tree=pathsToHub(g,hub,canTraverse);
+ const hub=g.hubKeys.get(capitalId);
+ // Дерево кратчайших путей из столицы кэшируется на графе и пересчитывается
+ // только при смене фильтра (война/мир) или столицы: иначе каждый вызов ботов
+ // строил бы Дейкстру заново (десятки миллисекунд на планирование).
+ const treeCache=g._treeCache??(g._treeCache=new Map());
+ const tKey=canTraverse??'open';
+ let entry=treeCache.get(tKey);
+ if(!entry||entry.hub!==hub){entry={hub,tree:pathsToHub(g,hub,canTraverse)};treeCache.set(tKey,entry)}
+ const tree=entry.tree;
  if(!tree)return null;
- const options=localRoadNodes(g,region).filter(([key])=>tree.has(key))
-  .map(([key,point])=>({key,point,d:distance(point,building)})).sort((a,b)=>a.d-b.d);
+ const hubPoint=g.nodes.get(hub);
+ // Ближайшая точка главной дороги внутри герцогства — чистая геометрия,
+ // кэшируется по слоту постройки.
+ const scanCache=g._edgeScan??(g._edgeScan=new Map());
+ const scanKey=region.id+':'+(building.slotId!=null?building.slotId:'x'+Math.round(building.x*10)+':'+Math.round(building.z*10));
+ let edgeKey=null,edgePoint=null,bestD=Infinity;
+ if(scanCache.has(scanKey)){const hit=scanCache.get(scanKey);edgeKey=hit.edgeKey;edgePoint=hit.edgePoint;bestD=hit.bestD}
+ else{
+  for(const [key,[a,b]] of g.edges){
+   const dx=b.x-a.x,dz=b.z-a.z,len2=dx*dx+dz*dz;
+   if(len2<1e-8)continue;
+   const t=Math.max(0,Math.min(1,((building.x-a.x)*dx+(building.z-a.z)*dz)/len2));
+   const p={x:a.x+dx*t,z:a.z+dz*t};
+   if(!insideRegion(region,p.x,p.z))continue;
+   const d=distance(p,building);
+   if(d<bestD){bestD=d;edgeKey=key;edgePoint=p}
+  }
+  scanCache.set(scanKey,{edgeKey,edgePoint,bestD});
+ }
  const allows=branch=>branch&&(!canTraverse||branch.every((point,i)=>!i||canTraverse(branch[i-1],point)));
- let selected=null,branch=null;
- for(const option of options){
-  const direct=[{x:building.x,z:building.z},{x:option.point.x,z:option.point.z}];
-  if(segmentWithin(region,building,option.point)&&allows(direct)){
-   selected=option;branch=direct;break;
-  }
+ // A building in the capital duchy hooks straight to the capital when that is closer.
+ if(region.id===capitalId&&distance(building,hubPoint)<=bestD){
+  let branch=[{x:building.x,z:building.z},{x:hubPoint.x,z:hubPoint.z}];
+  if(!segmentWithin(region,building,hubPoint))branch=routeWithin(region,building,hubPoint);
+  if(!branch||!allows(branch))return null;
+  branch.branchLength=branch.length;
+  return branch;
  }
- if(!selected)for(const option of options){
-  const detour=routeWithin(region,building,option.point);
-  if(allows(detour)){selected=option;branch=detour;break}
+ if(!edgePoint)return null;
+ // Otherwise the building path joins the main road at the nearest point on it.
+ const [na,nb]=edgeKey.split('|');
+ let startNode=null,startD=Infinity;
+ for(const n of [na,nb]){
+  const node=g.nodes.get(n);
+  if(!node||!insideRegion(region,node.x,node.z))continue;
+  if(n!==hub&&!tree.get(n))continue;
+  const d=distance(edgePoint,node);
+  if(d<startD){startD=d;startNode=n}
  }
- if(selected){
-  const path=branch.slice();
-  for(let key=tree.get(selected.key);key;key=tree.get(key)){
-   const {x,z}=g.nodes.get(key);
-   path.push({x,z});
-  }
-  path.branchLength=branch.length;
-  return path;
+ if(!startNode)return null;
+ const endpoint=g.nodes.get(startNode);
+ const approach=[{x:building.x,z:building.z},{x:edgePoint.x,z:edgePoint.z}];
+ if(startD>.001)approach.push({x:endpoint.x,z:endpoint.z});
+ let branch=null;
+ if(segmentWithin(region,building,edgePoint)&&(startD<=.001||segmentWithin(region,edgePoint,endpoint)))branch=approach;
+ if(!branch){
+  const detour=routeWithin(region,building,endpoint);
+  if(detour)branch=detour;
  }
- return null;
+ if(!branch||!allows(branch))return null;
+ const path=branch.slice();
+ if(startNode!==hub)for(let key=tree.get(startNode);key;key=tree.get(key)){
+  const {x,z}=g.nodes.get(key);
+  path.push({x,z});
+ }
+ path.branchLength=branch.length;
+ return path;
 }
 function attachCity(g,region,city){
+ // Граф изменится — сбрасываем кэши маршрутов (tree/edgeScan/pathCache),
+ // hubPaths инвалидируется сам по hubPathRevision = edges.size.
+ g._treeCache?.clear();g._edgeScan?.clear();g._pathCache?.clear();
  const options=localRoadNodes(g,region).map(([key,p])=>({key,p,d:distance(p,city)})).sort((a,b)=>a.d-b.d);
  for(const opt of options){
   const path=routeWithin(region,city,opt.p);

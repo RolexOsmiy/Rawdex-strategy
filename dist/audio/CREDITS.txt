@@ -1,0 +1,23 @@
+Звуковые эффекты «Балтийских путей»
+
+Все записи опубликованы под CC0 1.0. В игре используются укороченные фрагменты.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+city.mp3 — bolkmar — https://freesound.org/people/bolkmar/sounds/424790/
+grain.mp3 — evsecrets — https://freesound.org/people/evsecrets/sounds/346961/
+wood.mp3 — LiezelDippenaar — https://freesound.org/people/LiezelDippenaar/sounds/707527/
+iron.mp3 — guyburns — https://freesound.org/people/guyburns/sounds/558412/
+cloth.mp3 — snapcam — https://freesound.org/people/snapcam/sounds/582994/
+port.mp3 — Filipe Chagas — https://freesound.org/people/Filipe%20Chagas/sounds/91912/
+ship.mp3 — clif_creates — https://freesound.org/people/clif_creates/sounds/254125/
+unit.mp3 — qubodup — https://freesound.org/people/qubodup/sounds/816017/
+march.mp3 — stib — https://freesound.org/people/stib/sounds/240724/
+build.mp3 — CapsLok — https://freesound.org/people/CapsLok/sounds/204946/
+load.mp3 — 1urker — https://freesound.org/people/1urker/sounds/456977/
+delivery.mp3 — Breviceps — https://freesound.org/people/Breviceps/sounds/449955/
+trade.mp3 — yabeloko — https://freesound.org/people/yabeloko/sounds/85645/
+recruit.mp3 — aUREa — https://freesound.org/people/aUREa/sounds/475246/
+battle.mp3 — Christopherderp — https://freesound.org/people/Christopherderp/sounds/364531/
+victory.mp3 — adharca — https://freesound.org/people/adharca/sounds/539956/
+defeat.mp3 — Sclolex — https://freesound.org/people/Sclolex/sounds/209546/
+capture.mp3 — kirmm — https://freesound.org/people/kirmm/sounds/392180/

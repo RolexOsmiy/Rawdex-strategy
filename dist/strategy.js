@@ -3,22 +3,35 @@
 // Political names are tied to the founding city. A crowded match may start
 // several playable powers from the same historical polity.
 const BALTIC_POLITIES=[
- ['Корона Польская','mazowieckie','krakowskie','poznańskie','sandomierskie','lubelskie','kaliskie','ruskie','kijowskie','wołyńskie','czernihowskie','bełskie','bracławskie','podolskie','rawskie','sieradzkie','łęczyckie','płockie','brzeskie kujawskie','inowrocławskie','ziemia dobrzyńska','podlaskie'],
- ['Великое княжество Литовское','wileńskie','trockie','żmudzkie','nowogrodzkie','mińskie','brzeskie litewskie','mścisławskie','witebskie','smoleńskie'],
- ['Королевская Пруссия','pomorskie','malborskie','chełmińskie','warmińskie'],
- ['Герцогство Пруссия','Prusy Książęce'],['Герцогство Курляндии и Семигалии','Księstwo Kurlandii i Semigalii'],
- ['Инфлянтское герцогство','wendeńskie','parnawskie','doprackie'],['Померанское герцогство','okręg bytowski','okręg lęborski'],
- ['Полоцкое княжество','połockie'],['Севежское княжество','Księstwo Siewierskie'],['Спишское староство','starostwo spiskie']
+ ['Корона Польская','Королевство Польское','Речь Посполитая','mazowieckie','krakowskie','poznańskie','sandomierskie','lubelskie','kaliskie','ruskie','kijowskie','wołyńskie','czernihowskie','bełskie','bracławskie','podolskie','rawskie','sieradzkie','łęczyckie','płockie','brzeskie kujawskie','inowrocławskie','ziemia dobrzyńska','podlaskie'],
+ ['Великое княжество Литовское','Великое княжество Литовское','Речь Посполитая','wileńskie','trockie','żmudzkie','nowogrodzkie','mińskie','brzeskie litewskie','mścisławskie','witebskie','smoleńskie'],
+ ['Королевская Пруссия','Прусское королевство','Прусская империя','pomorskie','malborskie','chełmińskie','warmińskie'],
+ ['Герцогство Пруссия','Королевство Пруссия','Прусская империя','Prusy Książęce'],
+ ['Герцогство Курляндии и Семигалии','Курляндское герцогство','Балтийская империя','Księstwo Kurlandii i Semigalii'],
+ ['Инфлянтское герцогство','Ливонское королевство','Балтийская империя','wendeńskie','parnawskie','doprackie'],
+ ['Померанское герцогство','Померанское герцогство','Балтийская империя','okręg bytowski','okręg lęborski'],
+ ['Полоцкое княжество','Полоцкое княжество','Речь Посполитая','połockie'],
+ ['Севежское княжество','Севежское княжество','Речь Посполитая','Księstwo Siewierskie'],
+ ['Спишское староство','Спишское староство','Речь Посполитая','starostwo spiskie']
 ];
 const MEDITERRANEAN_POLITIES=[
- ['Испанская монархия','madrid','toledo','sevilla','cordoba','granada','malaga','murcia','valencia','zaragoza','barcelona','oran'],
- ['Королевство Португалия','lisbon','algarve','tangier'],['Королевство Франция','lyon','provence','toulouse'],
- ['Генуэзская республика','genoa'],['Миланское герцогство','milan'],['Венецианская республика','venice','split'],
- ['Великое герцогство Тосканское','florence'],['Папская область','rome'],['Неаполитанское королевство','naples','bari'],
- ['Сицилийское королевство','palermo'],['Сардинское королевство','sardinia'],
- ['Османская империя','istanbul','sarajevo','belgrade','durres','sofia','thessaloniki','athens','patras','izmir','bursa','ankara','antalya','adana','beirut','gaza'],
- ['Египетский эялет','cairo','alexandria'],['Триполитанский эялет','tripoli','tobruk','benghazi','sirte'],
- ['Тунисский эялет','tunis','sfax'],['Алжирский эялет','algiers','annaba'],['Саадидский султанат','rabat']
+ ['Испанская монархия','Королевство Испания','Испанская империя','madrid','toledo','sevilla','cordoba','granada','malaga','murcia','valencia','zaragoza','barcelona','oran'],
+ ['Королевство Португалия','Королевство Португалия','Португальская империя','lisbon','algarve','tangier'],
+ ['Королевство Франция','Королевство Франция','Французская империя','lyon','provence','toulouse'],
+ ['Генуэзская республика','Генуэзская республика','Генуэзская империя','genoa'],
+ ['Миланское герцогство','Миланское герцогство','Ломбардское королевство','milan'],
+ ['Венецианская республика','Венецианская республика','Венецианская империя','venice','split'],
+ ['Великое герцогство Тосканское','Великое герцогство Тосканское','Тосканское королевство','florence'],
+ ['Папская область','Папская область','Папская область','rome'],
+ ['Неаполитанское королевство','Неаполитанское королевство','Королевство Обеих Сицилий','naples','bari'],
+ ['Сицилийское королевство','Сицилийское королевство','Королевство Обеих Сицилий','palermo'],
+ ['Сардинское королевство','Сардинское королевство','Итальянское королевство','sardinia'],
+ ['Османская империя','Османский султанат','Османская империя','istanbul','sarajevo','belgrade','durres','sofia','thessaloniki','athens','patras','izmir','bursa','ankara','antalya','adana','beirut','gaza'],
+ ['Египетский эялет','Египетский султанат','Египетская империя','cairo','alexandria'],
+ ['Триполитанский эялет','Триполитанский эялет','Триполитанская империя','tripoli','tobruk','benghazi','sirte'],
+ ['Тунисский эялет','Тунисский султанат','Тунисская империя','tunis','sfax'],
+ ['Алжирский эялет','Алжирский султанат','Алжирская империя','algiers','annaba'],
+ ['Саадидский султанат','Саадидский султанат','Марокканская империя','rabat']
 ];
 const HISTORICAL_STARTS={
  baltic:['mazowieckie','wileńskie','Prusy Książęce','Księstwo Kurlandii i Semigalii','pomorskie','wendeńskie','okręg bytowski'],
@@ -26,8 +39,15 @@ const HISTORICAL_STARTS={
 };
 function historicalPolity(region,mediterranean){
  const key=region.key?.replace(/-district-\d+$/,'');
- const entry=(mediterranean?MEDITERRANEAN_POLITIES:BALTIC_POLITIES).find(([, ...keys])=>keys.includes(key));
+ const entry=(mediterranean?MEDITERRANEAN_POLITIES:BALTIC_POLITIES).find(([,,,...keys])=>keys.includes(key));
  return entry?.[0]||region.name;
+}
+// [duchy-name, kingdom-name, empire-name] — the realm's title grows with its
+// rank: a duchy is named by its seat, higher ranks take historical titles.
+function historicalPolityTitles(region,mediterranean){
+ const key=region.key?.replace(/-district-\d+$/,'');
+ const entry=(mediterranean?MEDITERRANEAN_POLITIES:BALTIC_POLITIES).find(([,,,...keys])=>keys.includes(key));
+ return entry?[entry[0],entry[1],entry[2]]:[region.name,region.name,region.name];
 }
 function historicalRivals(player,candidates,count,mediterranean,presetKeys=[],preferred=new Set()){
  const keys=HISTORICAL_STARTS[mediterranean?'mediterranean':'baltic'];

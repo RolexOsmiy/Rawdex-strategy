@@ -1,18 +1,20 @@
 'use strict';
 
 // These classic scripts share bindings. Fetch concurrently, execute in dependency order.
-globalThis.loadCampaign = async (map, progress) => {
- const mediterranean=map==='mediterranean';
- const folder=mediterranean?'maps/mediterranean/':'';
- const extras=mediterranean?['mediterranean/navigation.js',folder+'scenario.js',folder+'andalusia.js']:[];
+// A per-page-load stamp defeats stale browser caches mixing old and new scripts.
+const GAME_SCRIPT_STAMP=Date.now();
+globalThis.__gameScriptStamp=GAME_SCRIPT_STAMP;
+globalThis.loadCampaign = async (entry, progress) => {
+ const folder=entry.folder;
+ const extras=[...(entry.extras||[])];
  const data=['map-data.js','terrain-mesh.js','terrain-relief.js','parcel-data.js','road-data.js'].map(file=>folder+file);
- const files=[...extras,...data,'logic.js','transport.js','strategy.js','gpu/map-renderer.js'];
+ const files=[...extras,...data,'logic.js','transport.js','strategy.js','gpu/map-renderer.js','audio-cues.js'];
  function load(path){
   return new Promise((resolve,reject)=>{
    const tag=document.createElement('script');
-   tag.async=false;tag.src=path;
+   tag.async=false;tag.src=path+'?v='+GAME_SCRIPT_STAMP;
    tag.onload=resolve;
-   tag.onerror=()=>reject(new Error('Не удалось загрузить файлы кампании. Проверьте соединение и повторите попытку.'));
+   tag.onerror=()=>reject(new Error('Не удалось загрузить файлы карты. Проверьте соединение и повторите попытку.'));
    document.head.appendChild(tag);
   });
  }

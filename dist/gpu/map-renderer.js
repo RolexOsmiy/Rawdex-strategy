@@ -2,8 +2,9 @@
 
 // Submit the campaign mesh streams and materials into a Pixi render texture.
 class PixiMapRenderer {
- constructor(renderer, shaders, mapSize, depth, rows) {
-  Object.assign(this, {renderer, shaders, mapSize, depth, rows, device:renderer.gpu.device});
+ constructor(renderer, shaders, mapSize, depth, rows, sampleCount=4) {
+  Object.assign(this, {renderer, shaders, mapSize, depth, rows, device:renderer.gpu.device,
+   sampleCount:[1,4].includes(sampleCount)?sampleCount:4});
   // Constants used by the shared map drawing commands.
   const names=['ARRAY_BUFFER','STATIC_DRAW','DYNAMIC_DRAW','FLOAT','TRIANGLES','TEXTURE_2D',
    'TEXTURE_WRAP_S','TEXTURE_WRAP_T','TEXTURE_MIN_FILTER','TEXTURE_MAG_FILTER','LINEAR',
@@ -152,19 +153,36 @@ class PixiMapRenderer {
   oldFrame.destroy(true);
   this.sprite.width=w;this.sprite.height=h;
   this.depthTexture?.destroy();this.colorTexture?.destroy();
-  const descriptor={size:[w,h],sampleCount:4,usage:GPUTextureUsage.RENDER_ATTACHMENT};
+  const descriptor={size:[w,h],sampleCount:this.sampleCount,usage:GPUTextureUsage.RENDER_ATTACHMENT};
   this.depthTexture=this.device.createTexture({...descriptor,format:'depth24plus-stencil8'});
-  this.colorTexture=this.device.createTexture({...descriptor,format:'rgba8unorm'});
+  this.colorTexture=this.sampleCount>1?this.device.createTexture({...descriptor,format:'rgba8unorm'}):null;
  }
+  // Переключение сглаживания на лету: пересоздаём мультисэмпловые текстуры,
+  // конвейеры пересоберутся при следующем кадре (кэш ключуется состоянием).
+  setSampleCount(count){
+   count=[1,4].includes(count)?count:4;
+   if(this.sampleCount===count)return;
+   this.sampleCount=count;
+   this.pipelines.clear();
+   const canvas=this.renderer.canvas;
+   this.depthTexture?.destroy();this.colorTexture?.destroy();
+   this.depthTexture=null;this.colorTexture=null;
+   this.resize(canvas.width,canvas.height);
+  }
  clear(mask){
   if(!(mask&this.COLOR_BUFFER_BIT))return; // Stencil is already cleared at the start of the pass.
   const canvas=this.renderer.canvas;
   this.resize(canvas.width,canvas.height);
   this.cursor=0;
   this.encoder=this.device.createCommandEncoder({label:'Campaign map'});
+  // Без мультисэмплинга рендерим прямо в кадровую текстуру: resolveTarget у
+  // WebGPU допустим только для мультисэмпловых вложений.
+  const msaa=this.sampleCount>1;
   this.pass=this.encoder.beginRenderPass({colorAttachments:[{
-   view:this.colorTexture.createView(),resolveTarget:this.renderer.texture.getGpuSource(this.frameTexture.source).createView(),
-   clearValue:this.background,loadOp:'clear',storeOp:'discard'
+   view:msaa?this.colorTexture.createView():this.renderer.texture.getGpuSource(this.frameTexture.source).createView(),
+   resolveTarget:msaa?this.renderer.texture.getGpuSource(this.frameTexture.source).createView():undefined,
+   // Pixi reads the resolved frame after this pass. With MSAA off, the color attachment is the frame.
+   clearValue:this.background,loadOp:'clear',storeOp:msaa?'discard':'store'
   }],depthStencilAttachment:{view:this.depthTexture.createView(),depthClearValue:1,depthLoadOp:'clear',depthStoreOp:'discard',
    stencilClearValue:0,stencilLoadOp:'clear',stencilStoreOp:'discard'}});
  }
@@ -183,7 +201,7 @@ class PixiMapRenderer {
   return {label:program.name,layout:this.layout,vertex:{module:program.vertex,entryPoint:'main',buffers},
    fragment:{module:program.fragment,entryPoint:'main',targets:[target]},primitive:{topology:'triangle-list'},
    depthStencil:{format:'depth24plus-stencil8',depthWriteEnabled:depthTest&&depthWrite,depthCompare:depthTest?'less-equal':'always',
-    stencilFront:face,stencilBack:face,stencilWriteMask:stencil==='write'?255:0},multisample:{count:4}};
+    stencilFront:face,stencilBack:face,stencilWriteMask:stencil==='write'?255:0},multisample:{count:this.sampleCount}};
  }
  uniformPage(index){
   if(!this.pages[index]){

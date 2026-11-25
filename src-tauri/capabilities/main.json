@@ -1,0 +1,10 @@
+{
+  "identifier": "main",
+  "windows": ["main"],
+  "permissions": [
+    "allow-get-settings",
+    "allow-set-graphics",
+    "allow-set-fullscreen",
+    "allow-close-game"
+  ]
+}

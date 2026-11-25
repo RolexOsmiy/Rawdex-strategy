@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Балтийские пути</title><meta name="theme-color" content="#101d1d"><meta name="description" content="Балтийские пути — историческая стратегия. Выберите кампанию и возглавьте державу в 1619 году."><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="mvp.css"></head>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Балтийские пути</title><meta name="theme-color" content="#101d1d"><meta name="description" content="Балтийские пути — историческая стратегия. Выберите карту и возглавьте державу в 1619 году."><link rel="icon" type="image/svg+xml" href="favicon.svg"><link rel="stylesheet" href="style.css?v=3"><link rel="stylesheet" href="mvp.css"></head>
 <body><svg class="resource-symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><symbol id="resource-grain" viewBox="0 0 32 32"><path d="M16 29V9M12 28h8M16 13C10 13 9 8 10 6c4 0 6 3 6 7zm0 5c-6 0-8-4-8-7 4 0 8 3 8 7zm0 5c-5 0-7-3-7-6 4 0 7 2 7 6zm0-10c6 0 7-5 6-7-4 0-6 3-6 7zm0 5c6 0 8-4 8-7-4 0-8 3-8 7zm0 5c5 0 7-3 7-6-4 0-7 2-7 6z" fill="#e4bf6f" stroke="#332718" stroke-width="1.3" stroke-linejoin="round"/></symbol><symbol id="resource-wood" viewBox="0 0 32 32"><path d="M6 9l17-3 3 3-2 6-17 3-3-4zm1 10l17-3 3 3-2 6-17 3-3-4z" fill="#916039" stroke="#281e16" stroke-width="1.5"/><ellipse cx="8" cy="14" rx="3" ry="4" fill="#ddb47c" stroke="#312218" stroke-width="1.3"/><ellipse cx="9" cy="24" rx="3" ry="4" fill="#ddb47c" stroke="#312218" stroke-width="1.3"/><path d="M8 12v4m1 6v4" stroke="#75502c" stroke-width="1"/></symbol><symbol id="resource-iron" viewBox="0 0 32 32"><path d="M3 10h16l2 3 7-2-2 5-6 3-1 4 4 2v3H9v-3l4-2-1-4-6-3z" fill="#aab7bf" stroke="#202932" stroke-width="1.6" stroke-linejoin="round"/><path d="M8 13h9m-5 12h8" stroke="#f4f0dc" stroke-width="1.3"/></symbol><symbol id="resource-cloth" viewBox="0 0 32 32"><path d="M6 7l16-2 4 4v16L10 27l-4-4z" fill="#b28c75" stroke="#2a211d" stroke-width="1.5" stroke-linejoin="round"/><path d="M10 9v15m4-16v16m4-17v16m4-16v16M8 13l16-2M8 17l16-2M8 21l16-2" stroke="#f5e0c8" stroke-width="1"/><path d="M6 23l4 4" stroke="#2a211d" stroke-width="1.5"/></symbol><symbol id="resource-population" viewBox="0 0 32 32"><circle cx="16" cy="9" r="4" fill="#ead4ad" stroke="#30251d" stroke-width="1.5"/><path d="M9 25v-5c0-4 3-6 7-6s7 2 7 6v5z" fill="#899e80" stroke="#30251d" stroke-width="1.5"/><path d="M4 25v-4c0-3 2-5 5-5m19 9v-4c0-3-2-5-5-5" fill="none" stroke="#dfceae" stroke-width="2"/></symbol><symbol id="resource-gold" viewBox="0 0 32 32"><ellipse cx="16" cy="23" rx="10" ry="4" fill="#b98736" stroke="#332518" stroke-width="1.5"/><path d="M6 18v5c0 5 20 5 20 0v-5" fill="#cda24e" stroke="#332518" stroke-width="1.5"/><ellipse cx="16" cy="18" rx="10" ry="4" fill="#f1d68b" stroke="#332518" stroke-width="1.5"/><ellipse cx="17" cy="11" rx="8" ry="3.5" fill="#f3d486" stroke="#332518" stroke-width="1.5"/></symbol></svg><section id="front-shell" class="front-shell" data-screen="home" aria-label="Главное меню">
  <div class="front-art" aria-hidden="true"></div>
  <div class="front-frame">
@@ -9,21 +9,15 @@
    <p class="front-era">1619 <span></span> Историческая стратегия</p>
    <h1 id="front-title">Балтийские<br>пути</h1>
    <div class="front-actions">
-    <button class="front-button front-primary" type="button" id="front-play">Новая кампания</button>
+    <button class="front-button front-primary" type="button" id="front-play">Новая партия</button>
     <button class="front-button front-secondary" type="button" data-front-help>Управление</button>
+    <button class="front-button front-secondary" type="button" id="front-quit" hidden>Выйти из игры</button>
    </div>
   </section>
   <section class="front-page front-maps" data-front-page="maps" aria-labelledby="front-maps-title" hidden>
    <button class="front-back" type="button" data-front-back>Главное меню</button>
-   <h2 id="front-maps-title">Выбор кампании</h2>
-   <div class="front-map-grid">
-    <a class="front-map front-map-baltic" href="./?map=baltic" data-front-map="baltic">
-     <span class="front-map-text"><strong>Речь Посполитая</strong><small>Балтийские порты и земли Восточной Европы</small></span>
-    </a>
-    <a class="front-map front-map-med" href="./?map=mediterranean" data-front-map="mediterranean">
-     <span class="front-map-text"><strong>Средиземноморье</strong><small>Морские пути от Иберии до Леванта</small></span>
-    </a>
-   </div>
+   <h2 id="front-maps-title">Выбор карты</h2>
+   <div class="front-map-grid" id="front-map-list"></div>
   </section>
   <section class="front-page front-load" data-front-page="loading" aria-labelledby="front-loading-title" hidden>
    <h2 id="front-loading-title">Загрузка карты</h2>
@@ -72,7 +66,11 @@
  </div>
 </section>
 <noscript><p class="front-noscript">Для запуска игры включите JavaScript в браузере.</p></noscript>
-<main id="app" class="campaign-setup" inert><canvas id="world" aria-label="Трёхмерная карта земель"></canvas><div id="labels"></div><div class="atlas-vignette" aria-hidden="true"></div><div id="selection-box" class="selection-box" hidden></div><div id="slot-markers" aria-label="Графства для строительства"></div><div id="cargo-layer" aria-label="Движение грузов"></div><div id="patrol-range" aria-hidden="true" hidden></div><div id="fleet-layer" aria-label="Военные корабли"></div><div id="order-ping" aria-hidden="true" hidden><i></i></div><div id="rally-marker" class="rally-marker" aria-label="Точка сбора" hidden>⚑</div><div id="effects-layer" aria-hidden="true"></div><div id="army-layer" aria-label="Войска в пути"></div><header><div class="brand"><span class="crest">✦</span><span><b id="scenario-title">Речь Посполитая</b></span></div><div class="stat treasury" id="treasury-summary" tabindex="0"><small><svg class="treasury-icon" aria-hidden="true"><use href="#resource-gold"></use></svg> КАЗНА</small><b id="money">450 <em>зл.</em></b><small id="gold-rate"></small></div><button type="button" class="stat domain-shortcut" id="domain-shortcut" aria-controls="realm-overview" aria-expanded="false" title="Открыть владения"><small id="realm-label">ДОМЕН</small><b id="lands">0</b></button><div class="stat strategy-power"><small>МОЩЬ</small><b id="power">—</b></div><div class="stat"><small>ГРАФСТВА</small><b id="slots">—</b></div><section id="resource-bar" class="resource-bar" aria-label="Запасы столицы" hidden><div class="resource-label">ЗАПАСЫ<br>СТОЛИЦЫ</div><button type="button" class="resource resource-switch" id="stock-grain"></button><button type="button" class="resource resource-switch" id="stock-wood"></button><button type="button" class="resource resource-switch" id="stock-iron"></button><button type="button" class="resource resource-switch" id="stock-cloth"></button><div class="resource population" id="population" tabindex="0"></div><div class="resource trade-fleet" id="trade-fleet" tabindex="0" aria-label="Торговый транспорт"></div></section><div class="grow"></div><button type="button" id="game-menu-toggle" class="subtle game-menu-toggle" aria-label="Меню игры" title="Меню игры · Esc"><span aria-hidden="true">☰</span><span>Меню</span></button><button type="button" id="council-toggle" class="subtle council-toggle" aria-controls="council-panel" aria-expanded="false" hidden>Совет</button><button type="button" id="campaign-toggle" class="subtle" aria-controls="campaign-panel" aria-expanded="false" hidden>Цели</button><button id="notifications-toggle" class="notifications-toggle" type="button" aria-expanded="false" aria-label="Уведомления">✉ <span id="notifications-count" hidden>0</span></button></header>
+<main id="app" class="campaign-setup" inert><canvas id="world" aria-label="Трёхмерная карта земель"></canvas><div id="labels"></div><svg id="vassal-border-layer" class="vassal-border-layer" aria-hidden="true"></svg><div class="atlas-vignette" aria-hidden="true"></div><div id="selection-box" class="selection-box" hidden></div><div id="slot-markers" aria-label="Графства для строительства"></div><div id="cargo-layer" aria-label="Движение грузов"></div><div id="patrol-range" aria-hidden="true" hidden></div><div id="fleet-layer" aria-label="Военные корабли"></div><div id="order-ping" aria-hidden="true" hidden><i></i></div><div id="rally-marker" class="rally-marker" aria-label="Точка сбора" hidden>⚑</div><div id="effects-layer" aria-hidden="true"></div><div id="army-layer" aria-label="Войска в пути"></div><header><div class="brand"><span class="crest">✦</span><span><b id="scenario-title">Речь Посполитая</b></span></div><div class="stat treasury" id="treasury-summary" tabindex="0"><small><svg class="treasury-icon" aria-hidden="true"><use href="#resource-gold"></use></svg> КАЗНА</small><b id="money">450 <em>зл.</em></b><small id="gold-rate"></small></div><button type="button" class="stat domain-shortcut" id="domain-shortcut" aria-controls="realm-overview" aria-expanded="false" title="Открыть владения"><small id="realm-label">ДОМЕН</small><b id="lands">0</b></button><div class="stat strategy-power"><small>МОЩЬ</small><b id="power">—</b></div><div class="stat"><small>ГРАФСТВА</small><b id="slots">—</b></div><section id="resource-bar" class="resource-bar" aria-label="Запасы столицы" hidden><div class="resource-label">ЗАПАСЫ<br>СТОЛИЦЫ</div><button type="button" class="resource resource-switch" id="stock-grain"></button><button type="button" class="resource resource-switch" id="stock-wood"></button><button type="button" class="resource resource-switch" id="stock-iron"></button><button type="button" class="resource resource-switch" id="stock-cloth"></button><div class="resource population" id="population" tabindex="0"></div><div class="resource trade-fleet" id="trade-fleet" tabindex="0" aria-label="Торговый транспорт"></div></section><div class="grow"></div><button type="button" id="game-menu-toggle" class="subtle game-menu-toggle" aria-label="Меню игры" title="Меню игры · Esc"><span aria-hidden="true">☰</span><span>Меню</span></button><button type="button" id="council-toggle" class="subtle council-toggle" aria-controls="council-panel" aria-expanded="false" hidden>Совет</button><button type="button" id="campaign-toggle" class="subtle" aria-controls="campaign-panel" aria-expanded="false" hidden>Цели</button><button id="notifications-toggle" class="notifications-toggle" type="button" aria-expanded="false" aria-label="Уведомления">✉ <span id="notifications-count" hidden>0</span></button><div id="victory-rings" class="victory-rings" role="group" aria-label="Прогресс побед" hidden>
+ <button class="victory-ring" type="button" data-victory-path="military" aria-label="Военная победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true">⚔︎</span></button>
+ <button class="victory-ring" type="button" data-victory-path="trade" aria-label="Экономическая победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#resource-gold"/></svg></span></button>
+ <button class="victory-ring" type="button" data-victory-path="diplomacy" aria-label="Дипломатическая победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true">⚖︎</span></button>
+</div></header>
 <aside id="council-panel" class="council-panel" aria-labelledby="council-title" hidden>
  <div class="council-heading">
   <div class="council-title"><span class="council-title-emblem" id="council-title-icon"></span><h2 id="council-title">Совет державы</h2></div>
@@ -88,6 +86,7 @@
   <button id="council-tab-marshal" type="button" aria-pressed="false">Маршал</button>
   <button id="council-tab-steward" type="button" aria-pressed="true">Управляющий</button>
   <button id="council-tab-spymaster" type="button" aria-pressed="false">Тайный советник</button>
+   <button id="council-tab-vassals" type="button" aria-pressed="false">Вассалы</button>
  </div>
  <form id="council-task-form" class="council-task" aria-label="Назначить поручение">
   <div id="council-task-actions" class="advisor-actions" role="group" aria-label="Поручение советнику"></div>
@@ -103,6 +102,11 @@
   <p id="council-task-preview" class="council-note"></p>
   <button id="council-task-start" type="submit" class="council-primary"><span id="council-map-button-icon"></span>Выбрать герцогство на карте</button>
  </form>
+ <section id="council-vassals" class="council-vassals" aria-label="Вассалы державы" hidden>
+   <div class="council-heading"><h3 id="council-vassals-title">Вассалы и дома</h3></div>
+   <div id="council-vassals-list" class="council-vassals-list"></div>
+   <p id="council-vassals-empty" class="council-note">Вассалов пока нет. Передайте герцогство дому в карточке земли — вассал будет развивать её и защищать державу.</p>
+  </section>
  <section id="council-task-active" class="council-task-card" aria-label="Текущее поручение" hidden>
   <div class="council-heading">
    <div class="council-active-name">
@@ -143,25 +147,25 @@
  <ul id="council-month-places"></ul>
 </aside>
 <section id="campaign-panel" class="campaign-panel" aria-labelledby="campaign-title" hidden>
- <div class="campaign-heading"><h2 id="campaign-title">Цели кампании</h2><button id="campaign-close" type="button" aria-label="Закрыть цели">×</button></div>
+ <div class="campaign-heading"><h2 id="campaign-title">Цели партии</h2><button id="campaign-close" type="button" aria-label="Закрыть цели">×</button></div>
  <p id="campaign-race" class="campaign-race"></p>
  <div id="campaign-paths"></div>
  <button id="campaign-cargo" type="button" class="subtle" aria-label="Видимость торговых и грузовых путей">Обозы на карте · свои и торговые</button>
- <button id="campaign-reopen-recap" class="subtle" type="button" hidden>Рекап кампании</button>
+ <button id="campaign-reopen-recap" class="subtle" type="button" hidden>Рекап партии</button>
  <div class="campaign-secondary">
   <button id="realm-overview-toggle" type="button" aria-expanded="false">Управление владениями <span id="realm-overview-count" hidden></span></button>
-  <button id="reset" type="button">Выбор кампании</button>
+  <button id="reset" type="button">Выбор карты</button>
  </div>
 </section>
 <div id="campaign-finale" class="border-modal" role="dialog" aria-modal="true" aria-labelledby="campaign-result-title" hidden>
  <div class="border-dialog campaign-finale-card">
-  <div class="eyebrow">ИТОГ КАМПАНИИ</div>
+  <div class="eyebrow">ИТОГ ПАРТИИ</div>
   <h2 id="campaign-result-title"></h2>
   <p id="campaign-result-detail"></p>
   <div class="campaign-result-actions">
    <button id="campaign-watch-recap" type="button">Смотреть рекап</button>
    <button id="campaign-rematch" type="button" title="Та же столица, стартовые постройки и соперники">Реванш</button>
-   <button id="campaign-restart" type="button">Новая кампания</button>
+   <button id="campaign-restart" type="button">Новая партия</button>
    <button id="campaign-continue" type="button">Продолжить партию</button>
   </div>
  </div>
@@ -185,7 +189,7 @@
    <span id="recap-revenue"></span>
    <button id="recap-rematch" type="button" hidden>Реванш</button>
   </div>
-  <input id="recap-timeline" list="recap-ticks" type="range" min="0" max="10000" step="1" value="0" aria-label="Время кампании">
+  <input id="recap-timeline" list="recap-ticks" type="range" min="0" max="10000" step="1" value="0" aria-label="Время партии">
   <datalist id="recap-ticks"></datalist>
   <ol id="recap-moments" class="recap-moments" aria-label="Ключевые моменты партии"></ol>
  </div>
@@ -200,8 +204,14 @@
  <div id="campaign-starts" class="campaign-starts" aria-label="Рекомендуемые столицы"></div>
  <label class="setup-all" for="setup-all">Другие герцогства<select id="setup-all"></select></label>
  <p id="scenario-intro">Выберите один из предложенных стартов или город на карте.</p>
- <button id="setup-start" type="button" class="setup-start" disabled>Начать кампанию</button>
+ <button id="setup-start" type="button" class="setup-start" disabled>Начать партию</button>
 </div>
+<section id="army-selection" class="army-selection" aria-labelledby="army-selection-title" hidden>
+ <div class="notifications-heading"><strong id="army-selection-title">Выбранные войска</strong><button id="army-selection-close" type="button" aria-label="Снять выделение">×</button></div>
+ <p id="army-selection-total" aria-live="polite"></p>
+ <ul id="army-selection-list"></ul>
+ <small>Щёлкните по карте, чтобы отправить войска к ближайшей дороге.</small>
+</section>
 <aside id="card" class="duchy-card" aria-labelledby="name" hidden>
  <div class="duchy-hero">
   <button id="card-close" class="duchy-close" type="button" aria-label="Закрыть карточку" data-duchy-icon="close"></button>
@@ -277,6 +287,9 @@
     <section id="duchy-granary" class="duchy-block" hidden>
      <h3><i data-duchy-icon="grain"></i>Продовольствие</h3>
      <p id="duchy-granary-stock" class="duchy-stat-line"></p><p id="duchy-granary-route"></p><p id="duchy-granary-balance"></p>
+      <button id="duchy-store-build" class="duchy-action" type="button"><i data-duchy-icon="hammer"></i>Построить склад</button>
+      <small id="duchy-store-status"></small>
+      <button id="duchy-supply-priority" class="duchy-action" type="button" aria-pressed="false"><i data-duchy-icon="grain"></i>Снабжение: обычное</button>
     </section>
     <section id="regional-economy" class="duchy-block regional-economy" hidden>
      <h3><i data-duchy-icon="coins"></i>Хозяйство</h3>
@@ -287,6 +300,8 @@
      </details>
      <button id="relief-send" class="duchy-action" type="button"><i data-duchy-icon="grain"></i>Помочь жителям</button>
      <small id="relief-reason"></small>
+     <button id="pacify-start" class="duchy-action" type="button"><i data-duchy-icon="shield"></i>Умиротворить землю</button>
+     <small id="pacify-status"></small>
     </section>
     <section id="duchy-market" class="duchy-block" hidden>
      <h3><i data-duchy-icon="cart"></i>Торговый центр</h3>
@@ -387,4 +402,12 @@
 <button id="muster-toggle" type="button" aria-controls="muster-panel" aria-expanded="false" hidden>Набор войска <kbd>G</kbd></button><div class="footer-title"><span>СТРОИТЕЛЬСТВО</span><small>ВЫБЕРИТЕ ПОСТРОЙКУ И МЕСТО НА КАРТЕ</small></div><nav id="tools"></nav><div class="keys">Колесо — масштаб<br>ЛКМ — рамка · СКМ — карта<br><kbd>ESC</kbd> — отменить</div></div><div class="camera-help">
 <button id="camera-home" type="button" title="К столице и исходному ракурсу (Home)" aria-label="Вернуться к столице">
 <span id="atlas-needle" aria-hidden="true"><svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="16" fill="none" stroke="currentColor" stroke-opacity=".47"/><path d="M20 4l5 15-5 4-5-4z" fill="currentColor"/><path d="M20 36l5-15-5 4-5-4z" fill="currentColor" opacity=".42"/><path d="M4 20h7m18 0h7" stroke="currentColor" fill="none"/></svg></span>
-</button><span id="atlas-scale">Обзор держав</span><button id="feedback-sound" type="button" aria-label="Звуковые эффекты" aria-pressed="true" title="Выключить звуковые эффекты">♪</button></div><div id="traffic-legend" class="traffic-legend" hidden>ОЖИВЛЁННЫЕ ДОРОГИ · ЧАЩЕ ПРОХОДЯТ ОБОЗЫ</div><time id="game-date" class="game-date" aria-label="Игровая дата">1 января 1619 г.</time><div id="action-tooltip" class="action-tooltip" role="tooltip" hidden><strong id="action-tooltip-title"></strong><div id="action-tooltip-body"></div></div><div id="toast" role="status" aria-live="polite"></div><div id="error" hidden></div></main><script src="locales/catalog.js" defer></script><script src="locales/interface.js" defer></script><script src="load-map.js" defer></script><script src="game-shell.js" defer></script></body></html>
+</button><span id="atlas-scale">Обзор держав</span><button id="feedback-sound" type="button" aria-label="Звуковые эффекты" aria-pressed="true" title="Выключить звуковые эффекты">♪</button><button id="settings-toggle" type="button" aria-label="Настройки графики и окна" aria-pressed="false" aria-controls="settings-panel" title="Настройки графики и окна"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 .1-1 7.6 7.6 0 0 0-.1-1l2.1-1.6a.5.5 0 0 0 .1-.7l-2-3.4a.5.5 0 0 0-.6-.2l-2.5 1a7.4 7.4 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5l-.4 2.6a7.4 7.4 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.4a.5.5 0 0 0 .1.7l2.1 1.6a7.6 7.6 0 0 0-.1 1 7.6 7.6 0 0 0 .1 1l-2.1 1.6a.5.5 0 0 0-.1.7l2 3.4c.1.2.4.3.6.2l2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.6c0 .3.2.5.5.5h4c.3 0 .5-.2.5-.5l.4-2.6a7.4 7.4 0 0 0 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.4a.5.5 0 0 0-.1-.7zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg></button></div><div id="traffic-legend" class="traffic-legend" hidden>ОЖИВЛЁННЫЕ ДОРОГИ · ЧАЩЕ ПРОХОДЯТ ОБОЗЫ</div><time id="game-date" class="game-date" aria-label="Игровая дата">1 января 1619 г.</time><span id="fps-meter" class="fps-meter" role="status" aria-label="Кадры в секунду" hidden>60 FPS</span><section id="settings-panel" class="settings-panel" role="dialog" aria-label="Настройки" hidden>
+<div class="notifications-heading"><strong id="settings-title">Настройки</strong><button id="settings-close" aria-label="Закрыть">×</button></div>
+<label class="setting-row"><span class="setting-label" id="settings-label-fullscreen">Полный экран</span><span class="setting-control"><input type="checkbox" id="set-fullscreen"></span></label>
+<label class="setting-row"><span class="setting-label" id="settings-label-fps">Счётчик FPS</span><span class="setting-control"><input type="checkbox" id="set-fps"></span></label>
+<label class="setting-row"><span class="setting-label" id="settings-label-msaa">Сглаживание (MSAA)</span><span class="setting-control"><input type="checkbox" id="set-msaa"></span></label>
+<label class="setting-row"><span class="setting-label" id="settings-label-scale">Масштаб рендера</span><span class="setting-control"><select id="set-scale"><option value="1">100%</option><option value="0.75">75%</option><option value="0.5">50%</option></select></span></label>
+<small id="settings-gpu-info" class="settings-note"></small>
+<button id="settings-reset" type="button" class="settings-reset">Сбросить настройки</button>
+</section><div id="action-tooltip" class="action-tooltip" role="tooltip" hidden><strong id="action-tooltip-title"></strong><div id="action-tooltip-body"></div></div><div id="toast" role="status" aria-live="polite"></div><div id="error" hidden></div></main><script src="locales/catalog.js?v=6" defer></script><script src="locales/interface.js?v=3" defer></script><script src="maps.js?v=3" defer></script><script src="load-map.js?v=4" defer></script><script src="settings.js?v=4" defer></script><script src="game-shell.js?v=4" defer></script></body></html>
