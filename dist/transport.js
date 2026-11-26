@@ -79,6 +79,7 @@ function pathsToHub(g,hub,canTraverse){
    heapPushRoad(queue,{id:next,f:total});
   }
  }
+ nextHop.distances=cost;
  cache.set(hub,nextHop);
  return nextHop;
 }
@@ -92,79 +93,122 @@ function routeToHub(g,from,hub,canTraverse=null){
  }
  return path;
 }
-function attachBuilding(g,region,building,capitalId,canTraverse=null){
- const hub=g.hubKeys.get(capitalId);
- // Дерево кратчайших путей из столицы кэшируется на графе и пересчитывается
- // только при смене фильтра (война/мир) или столицы: иначе каждый вызов ботов
- // строил бы Дейкстру заново (десятки миллисекунд на планирование).
- const treeCache=g._treeCache??(g._treeCache=new Map());
- const tKey=canTraverse??'open';
- let entry=treeCache.get(tKey);
- if(!entry||entry.hub!==hub){entry={hub,tree:pathsToHub(g,hub,canTraverse)};treeCache.set(tKey,entry)}
- const tree=entry.tree;
- if(!tree)return null;
- const hubPoint=g.nodes.get(hub);
- // Ближайшая точка главной дороги внутри герцогства — чистая геометрия,
- // кэшируется по слоту постройки.
- const scanCache=g._edgeScan??(g._edgeScan=new Map());
- const scanKey=region.id+':'+(building.slotId!=null?building.slotId:'x'+Math.round(building.x*10)+':'+Math.round(building.z*10));
- let edgeKey=null,edgePoint=null,bestD=Infinity;
- if(scanCache.has(scanKey)){const hit=scanCache.get(scanKey);edgeKey=hit.edgeKey;edgePoint=hit.edgePoint;bestD=hit.bestD}
- else{
-  for(const [key,[a,b]] of g.edges){
-   const dx=b.x-a.x,dz=b.z-a.z,len2=dx*dx+dz*dz;
-   if(len2<1e-8)continue;
-   const t=Math.max(0,Math.min(1,((building.x-a.x)*dx+(building.z-a.z)*dz)/len2));
-   const p={x:a.x+dx*t,z:a.z+dz*t};
-   if(!insideRegion(region,p.x,p.z))continue;
-   const d=distance(p,building);
-   if(d<bestD){bestD=d;edgeKey=key;edgePoint=p}
+function buildingRoadJunctions(g,region,building){
+ const cache=g._edgeScan??=new Map();
+ const key=region.id+':'+building.x+':'+building.z;
+ if(cache.has(key))return cache.get(key);
+ const hits=[];
+ for(const [edge,[a,b]] of g.edges){
+  const dx=b.x-a.x,dz=b.z-a.z,length2=dx*dx+dz*dz;
+  if(length2<1e-8||!region.bounds.some(([minX,minZ,maxX,maxZ])=>
+   Math.max(a.x,b.x)>=minX&&Math.min(a.x,b.x)<=maxX&&Math.max(a.z,b.z)>=minZ&&Math.min(a.z,b.z)<=maxZ))continue;
+  const projected=Math.max(0,Math.min(1,((building.x-a.x)*dx+(building.z-a.z)*dz)/length2));
+  const at=t=>({x:a.x+dx*t,z:a.z+dz*t});
+  const projection=at(projected);
+  const points=insideRegion(region,projection.x,projection.z)?[projection]:
+   segmentRegionSpans(region,a,b).map(([lo,hi])=>at(Math.max(lo+1e-7,Math.min(hi-1e-7,projected))));
+  const keys=edge.split('|');
+  for(const point of points)hits.push({point,keys,gap:distance(building,point)});
+ }
+ hits.sort((a,b)=>a.gap-b.gap);
+ cache.set(key,hits);
+ return hits;
+}
+function roadJunctionExit(g,tree,point,keys,canTraverse){
+ let endpoint=null,remaining=Infinity;
+ for(const key of keys){
+  const node=g.nodes.get(key),other=keys[0]===key?keys[1]:keys[0];
+  if(!tree.has(key))continue;
+  const distanceToNode=distance(point,node);
+  if(distanceToNode>1e-7&&canTraverse&&!canTraverse(point,node))continue;
+  if(distanceToNode>1e-7&&tree.get(key)===other&&distance(point,g.nodes.get(other))>1e-7)continue;
+  const length=distanceToNode+tree.distances.get(key);
+  if(length<remaining){endpoint=key;remaining=length}
+ }
+ return endpoint===null?null:{endpoint,remaining};
+}
+function branchRoadContact(from,to,a,b){
+ const dx=to.x-from.x,dz=to.z-from.z,ex=b.x-a.x,ez=b.z-a.z;
+ const x=a.x-from.x,z=a.z-from.z,det=dx*ez-dz*ex;
+ if(Math.abs(det)>1e-9){
+  const t=(x*ez-z*ex)/det,u=(x*dz-z*dx)/det;
+  return t>=0&&t<=1&&u>=0&&u<=1?t:null;
+ }
+ if(Math.abs(x*dz-z*dx)>1e-7)return null;
+ const length2=dx*dx+dz*dz;
+ if(length2<1e-9)return null;
+ const t0=(x*dx+z*dz)/length2,t1=t0+(ex*dx+ez*dz)/length2;
+ const t=Math.max(0,Math.min(t0,t1));
+ return t<=1&&Math.max(t0,t1)>=0?t:null;
+}
+function firstBranchRoad(g,branch,junctions,tree,canTraverse){
+ for(let i=1;i<branch.length;i++){
+  const from=branch[i-1],to=branch[i];
+  let closest=null;
+  for(const {keys} of junctions){
+   const [a,b]=keys.map(key=>g.nodes.get(key));
+   const t=branchRoadContact(from,to,a,b);
+   if(t===null||closest&&t>=closest.t)continue;
+   const point={x:from.x+(to.x-from.x)*t,z:from.z+(to.z-from.z)*t};
+   const exit=roadJunctionExit(g,tree,point,keys,canTraverse);
+   if(exit)closest={...exit,point,t};
   }
-  scanCache.set(scanKey,{edgeKey,edgePoint,bestD});
+  if(closest){
+   const prefix=branch.slice(0,i);
+   if(closest.t>1e-7)prefix.push(closest.point);
+   return {...closest,branch:prefix};
+  }
  }
- const allows=branch=>branch&&(!canTraverse||branch.every((point,i)=>!i||canTraverse(branch[i-1],point)));
- // A building in the capital duchy hooks straight to the capital when that is closer.
- if(region.id===capitalId&&distance(building,hubPoint)<=bestD){
-  let branch=[{x:building.x,z:building.z},{x:hubPoint.x,z:hubPoint.z}];
-  if(!segmentWithin(region,building,hubPoint))branch=routeWithin(region,building,hubPoint);
+ return null;
+}
+function attachBuilding(g,region,building,capitalId,canTraverse=null){
+ const hub=g.hubKeys.get(capitalId),tree=pathsToHub(g,hub,canTraverse);
+ if(!tree)return null;
+ const origin={x:building.x,z:building.z};
+ const allows=branch=>!canTraverse||branch.every((point,i)=>!i||canTraverse(branch[i-1],point));
+ const junctions=buildingRoadJunctions(g,region,building);
+ let best=null;
+ for(const hit of junctions){
+  if(best&&hit.gap>best.branchLength+1e-7)break;
+  const {point,keys,gap}=hit;
+  let exit=roadJunctionExit(g,tree,point,keys,canTraverse);
+  if(!exit)continue;
+  const direct=segmentWithin(region,origin,point);
+  let branch;
+  if(direct)branch=gap<1e-7?[origin]:[origin,point];
+  else{
+   if(!Object.hasOwn(hit,'detour'))hit.detour=routeWithin(region,origin,point);
+   if(!hit.detour)continue;
+   const first=firstBranchRoad(g,hit.detour,junctions,tree,canTraverse);
+   if(first){exit=first;branch=first.branch}else branch=hit.detour;
+  }
+  if(!allows(branch))continue;
+  const branchLength=routeLength(branch),{endpoint,remaining}=exit;
+  if(!best||branchLength<best.branchLength-1e-7||Math.abs(branchLength-best.branchLength)<=1e-7&&remaining<best.remaining)
+   best={endpoint,branch,branchLength,remaining};
+ }
+ if(!best){
+  if(region.id!==capitalId)return null;
+  const hubPoint=g.nodes.get(hub),destination={x:hubPoint.x,z:hubPoint.z};
+  const branch=segmentWithin(region,origin,destination)?[origin,destination]:routeWithin(region,origin,destination);
   if(!branch||!allows(branch))return null;
-  branch.branchLength=branch.length;
-  return branch;
+  best=firstBranchRoad(g,branch,junctions,tree,canTraverse)||{endpoint:hub,branch};
  }
- if(!edgePoint)return null;
- // Otherwise the building path joins the main road at the nearest point on it.
- const [na,nb]=edgeKey.split('|');
- let startNode=null,startD=Infinity;
- for(const n of [na,nb]){
-  const node=g.nodes.get(n);
-  if(!node||!insideRegion(region,node.x,node.z))continue;
-  if(n!==hub&&!tree.get(n))continue;
-  const d=distance(edgePoint,node);
-  if(d<startD){startD=d;startNode=n}
+ const contact=firstBranchRoad(g,best.branch,junctions,tree,canTraverse);
+ if(contact&&routeLength(contact.branch)<routeLength(best.branch)-1e-7)best=contact;
+ const {branch,endpoint}=best,path=branch.slice();
+ for(let key=endpoint;key;key=tree.get(key)){
+  const {x,z}=g.nodes.get(key),point={x,z};
+  if(distance(path.at(-1),point)>1e-7)path.push(point);
  }
- if(!startNode)return null;
- const endpoint=g.nodes.get(startNode);
- const approach=[{x:building.x,z:building.z},{x:edgePoint.x,z:edgePoint.z}];
- if(startD>.001)approach.push({x:endpoint.x,z:endpoint.z});
- let branch=null;
- if(segmentWithin(region,building,edgePoint)&&(startD<=.001||segmentWithin(region,edgePoint,endpoint)))branch=approach;
- if(!branch){
-  const detour=routeWithin(region,building,endpoint);
-  if(detour)branch=detour;
- }
- if(!branch||!allows(branch))return null;
- const path=branch.slice();
- if(startNode!==hub)for(let key=tree.get(startNode);key;key=tree.get(key)){
-  const {x,z}=g.nodes.get(key);
-  path.push({x,z});
- }
+ if(path.length===1)path.push({...path[0]});
  path.branchLength=branch.length;
  return path;
 }
 function attachCity(g,region,city){
  // Граф изменится — сбрасываем кэши маршрутов (tree/edgeScan/pathCache),
  // hubPaths инвалидируется сам по hubPathRevision = edges.size.
- g._treeCache?.clear();g._edgeScan?.clear();g._pathCache?.clear();
+ g._edgeScan?.clear();g._pathCache?.clear();
  const options=localRoadNodes(g,region).map(([key,p])=>({key,p,d:distance(p,city)})).sort((a,b)=>a.d-b.d);
  for(const opt of options){
   const path=routeWithin(region,city,opt.p);

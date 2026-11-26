@@ -66,7 +66,7 @@
  </div>
 </section>
 <noscript><p class="front-noscript">Для запуска игры включите JavaScript в браузере.</p></noscript>
-<main id="app" class="campaign-setup" inert><canvas id="world" aria-label="Трёхмерная карта земель"></canvas><div id="labels"></div><svg id="vassal-border-layer" class="vassal-border-layer" aria-hidden="true"></svg><div class="atlas-vignette" aria-hidden="true"></div><div id="selection-box" class="selection-box" hidden></div><div id="slot-markers" aria-label="Графства для строительства"></div><div id="cargo-layer" aria-label="Движение грузов"></div><div id="patrol-range" aria-hidden="true" hidden></div><div id="fleet-layer" aria-label="Военные корабли"></div><div id="order-ping" aria-hidden="true" hidden><i></i></div><div id="rally-marker" class="rally-marker" aria-label="Точка сбора" hidden>⚑</div><div id="effects-layer" aria-hidden="true"></div><div id="army-layer" aria-label="Войска в пути"></div><header><div class="brand"><span class="crest">✦</span><span><b id="scenario-title">Речь Посполитая</b></span></div><div class="stat treasury" id="treasury-summary" tabindex="0"><small><svg class="treasury-icon" aria-hidden="true"><use href="#resource-gold"></use></svg> КАЗНА</small><b id="money">450 <em>зл.</em></b><small id="gold-rate"></small></div><button type="button" class="stat domain-shortcut" id="domain-shortcut" aria-controls="realm-overview" aria-expanded="false" title="Открыть владения"><small id="realm-label">ДОМЕН</small><b id="lands">0</b></button><div class="stat strategy-power"><small>МОЩЬ</small><b id="power">—</b></div><div class="stat"><small>ГРАФСТВА</small><b id="slots">—</b></div><section id="resource-bar" class="resource-bar" aria-label="Запасы столицы" hidden><div class="resource-label">ЗАПАСЫ<br>СТОЛИЦЫ</div><button type="button" class="resource resource-switch" id="stock-grain"></button><button type="button" class="resource resource-switch" id="stock-wood"></button><button type="button" class="resource resource-switch" id="stock-iron"></button><button type="button" class="resource resource-switch" id="stock-cloth"></button><div class="resource population" id="population" tabindex="0"></div><div class="resource trade-fleet" id="trade-fleet" tabindex="0" aria-label="Торговый транспорт"></div></section><div class="grow"></div><button type="button" id="game-menu-toggle" class="subtle game-menu-toggle" aria-label="Меню игры" title="Меню игры · Esc"><span aria-hidden="true">☰</span><span>Меню</span></button><button type="button" id="council-toggle" class="subtle council-toggle" aria-controls="council-panel" aria-expanded="false" hidden>Совет</button><button type="button" id="campaign-toggle" class="subtle" aria-controls="campaign-panel" aria-expanded="false" hidden>Цели</button><button id="notifications-toggle" class="notifications-toggle" type="button" aria-expanded="false" aria-label="Уведомления">✉ <span id="notifications-count" hidden>0</span></button><div id="victory-rings" class="victory-rings" role="group" aria-label="Прогресс побед" hidden>
+<main id="app" class="campaign-setup" inert><canvas id="world" aria-label="Трёхмерная карта земель"></canvas><div id="labels"></div><svg id="vassal-border-layer" class="vassal-border-layer" aria-hidden="true"></svg><div class="atlas-vignette" aria-hidden="true"></div><div id="selection-box" class="selection-box" hidden></div><div id="slot-markers" aria-label="Графства для строительства"></div><div id="cargo-layer" aria-label="Движение грузов"></div><div id="patrol-range" aria-hidden="true" hidden></div><div id="fleet-layer" aria-label="Военные корабли"></div><div id="order-ping" aria-hidden="true" hidden><i></i></div><div id="effects-layer" aria-hidden="true"></div><div id="army-layer" aria-label="Войска в пути"></div><header><div class="brand" aria-hidden="true"><span class="crest">✦</span></div><div class="stat treasury" id="treasury-summary" tabindex="0"><small><svg class="treasury-icon" aria-hidden="true"><use href="#resource-gold"></use></svg> КАЗНА</small><b id="money">450 <em>зл.</em></b><small id="gold-rate"></small></div><button type="button" class="stat domain-shortcut" id="domain-shortcut" aria-controls="realm-overview" aria-expanded="false" title="Открыть владения"><small id="realm-label">ДОМЕН</small><b id="lands">0</b></button><div class="stat strategy-power"><small>МОЩЬ</small><b id="power">—</b></div><div class="stat"><small>ГРАФСТВА</small><b id="slots">—</b></div><section id="resource-bar" class="resource-bar" aria-label="Запасы столицы" hidden><div class="resource-label">ЗАПАСЫ<br>СТОЛИЦЫ</div><button type="button" class="resource resource-switch" id="stock-grain"></button><button type="button" class="resource resource-switch" id="stock-wood"></button><button type="button" class="resource resource-switch" id="stock-iron"></button><button type="button" class="resource resource-switch" id="stock-cloth"></button><div class="resource population" id="population" tabindex="0"></div><div class="resource trade-fleet" id="trade-fleet" tabindex="0" aria-label="Торговый транспорт"></div></section><div class="grow"></div><button type="button" id="game-menu-toggle" class="subtle game-menu-toggle" aria-label="Меню игры" title="Меню игры · Esc"><span aria-hidden="true">☰</span><span>Меню</span></button><button type="button" id="council-toggle" class="subtle council-toggle" aria-controls="council-panel" aria-expanded="false" hidden>Совет</button><button type="button" id="campaign-toggle" class="subtle" aria-controls="campaign-panel" aria-expanded="false" hidden>Цели</button><button id="notifications-toggle" class="notifications-toggle" type="button" aria-expanded="false" aria-label="Уведомления">✉ <span id="notifications-count" hidden>0</span></button><div id="victory-rings" class="victory-rings" role="group" aria-label="Прогресс побед" hidden>
  <button class="victory-ring" type="button" data-victory-path="military" aria-label="Военная победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true">⚔︎</span></button>
  <button class="victory-ring" type="button" data-victory-path="trade" aria-label="Экономическая победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#resource-gold"/></svg></span></button>
  <button class="victory-ring" type="button" data-victory-path="diplomacy" aria-label="Дипломатическая победа" aria-controls="campaign-panel" aria-expanded="false"><span class="victory-icon" aria-hidden="true">⚖︎</span></button>
@@ -146,6 +146,11 @@
  </div>
  <ul id="council-month-places"></ul>
 </aside>
+<div id="campaign-threats" class="campaign-threats" role="group" aria-label="Угрозы победы" hidden></div>
+<details id="realm-power-board" class="realm-power-board" open hidden>
+ <summary>Мощь держав</summary>
+ <ol id="realm-power-list"></ol>
+</details>
 <section id="campaign-panel" class="campaign-panel" aria-labelledby="campaign-title" hidden>
  <div class="campaign-heading"><h2 id="campaign-title">Цели партии</h2><button id="campaign-close" type="button" aria-label="Закрыть цели">×</button></div>
  <p id="campaign-race" class="campaign-race"></p>
@@ -172,7 +177,7 @@
 </div>
 <section id="campaign-recap" class="campaign-recap" role="dialog" aria-modal="true" aria-labelledby="recap-title" hidden>
  <div class="recap-heading">
-  <div><p id="recap-scenario"></p><h2 id="recap-title"></h2></div>
+  <div><p id="recap-scenario"></p><h2 id="recap-title"></h2><p id="recap-winner"></p></div>
   <button id="recap-close" type="button">К итогам</button>
  </div>
  <div class="recap-stage">
@@ -302,6 +307,7 @@
      <small id="relief-reason"></small>
      <button id="pacify-start" class="duchy-action" type="button"><i data-duchy-icon="shield"></i>Умиротворить землю</button>
      <small id="pacify-status"></small>
+     <button id="domain-priority" class="duchy-action" type="button" aria-pressed="false" hidden></button>
     </section>
     <section id="duchy-market" class="duchy-block" hidden>
      <h3><i data-duchy-icon="cart"></i>Торговый центр</h3>
@@ -323,16 +329,12 @@
    </section>
    <section id="duchy-pane-army" role="tabpanel" tabindex="0" aria-labelledby="duchy-tab-army" hidden>
     <section id="local-muster" class="duchy-block" hidden>
-     <h3><i data-duchy-icon="swords"></i>Гарнизон и набор</h3>
+     <h3><i data-duchy-icon="swords"></i>Генералы и набор</h3>
+     <label class="general-picker" for="recruit-general">Пополнить армию<select id="recruit-general"></select></label>
      <p id="garrison-info" class="duchy-stat-line"></p>
      <button id="recruit-soldiers" class="duchy-action" type="button"><i data-duchy-icon="swords"></i><span id="recruit-soldiers-label">Нанять 100 солдат</span></button>
      <small id="recruit-reason"></small>
      <div id="recruit-queue" aria-label="Очередь набора"></div>
-     <div class="recruit-rally-actions"><button id="rally-set" type="button">Точка сбора</button><button id="rally-clear" type="button" aria-label="Сбросить точку сбора" hidden>×</button></div>
-     <details id="duchy-march-details" class="duchy-fold">
-      <summary>Отправить гарнизон в поход</summary>
-      <div class="army-orders"><label for="march-count">Солдат в походе</label><input id="march-count" type="number" min="1" step="1" inputmode="numeric"><div id="march-options"></div><small id="march-note"></small></div>
-     </details>
     </section>
     <section id="fortification-panel" class="duchy-block" hidden>
      <h3><i data-duchy-icon="fort"></i>Пограничная крепость</h3>
@@ -364,7 +366,7 @@
      <p id="war-status"></p>
      <section id="diplomacy-tools" class="diplomacy-tools" aria-label="Переговоры" hidden>
       <p id="diplomacy-trust" class="duchy-stat-line"></p><p id="diplomacy-embassy" hidden></p><p id="diplomacy-defenders"></p>
-      <div><button id="diplomacy-envoy" type="button">Посланник</button><button id="diplomacy-ally" type="button">Заключить союз</button><button id="diplomacy-harbor" type="button" hidden>Торговая концессия</button></div>
+      <div><button id="diplomacy-envoy" type="button">Посланник</button><button id="diplomacy-ally" type="button">Заключить союз</button><button id="diplomacy-break" type="button" hidden>Разорвать союз</button><button id="diplomacy-embargo" type="button" hidden>Ввести эмбарго</button><button id="diplomacy-harbor" type="button" hidden>Торговая концессия</button></div>
       <small id="diplomacy-hint"></small>
      </section>
      <div id="trade-partner-info" class="trade-partner-info"></div>
@@ -397,7 +399,8 @@
 </div>
 <section id="building-detail" class="building-detail" aria-label="Выбранная постройка" hidden><button id="building-close" class="building-close" aria-label="Закрыть">×</button><small id="building-kicker"></small><strong id="building-name"></strong><span id="building-output"></span><span id="building-workforce" hidden></span><button id="building-upgrade" class="building-upgrade"></button><button id="building-demolish" class="building-upgrade building-demolish" type="button">Снести постройку</button><button id="commission-warship" class="building-upgrade" type="button" hidden></button><small id="building-note"></small></section><div id="placement" hidden></div><div id="fleet-actions" hidden><button id="fleet-repair" type="button">Ремонт в порту</button></div><div class="footer"><section id="muster-panel" class="muster-panel" aria-label="Набор войска" hidden>
 <div class="notifications-heading"><strong>Набор войска</strong><button id="muster-close" aria-label="Закрыть">×</button></div>
-<p>Отряд из 100 жителей · 50 золота · 6 железа · 4 ткани</p>
+<label class="general-picker" for="muster-general">Пополнить армию<select id="muster-general"></select></label>
+<p>100 жителей · 50 золота · 6 железа · 4 ткани</p>
 <div id="muster-list"></div></section>
 <button id="muster-toggle" type="button" aria-controls="muster-panel" aria-expanded="false" hidden>Набор войска <kbd>G</kbd></button><div class="footer-title"><span>СТРОИТЕЛЬСТВО</span><small>ВЫБЕРИТЕ ПОСТРОЙКУ И МЕСТО НА КАРТЕ</small></div><nav id="tools"></nav><div class="keys">Колесо — масштаб<br>ЛКМ — рамка · СКМ — карта<br><kbd>ESC</kbd> — отменить</div></div><div class="camera-help">
 <button id="camera-home" type="button" title="К столице и исходному ракурсу (Home)" aria-label="Вернуться к столице">

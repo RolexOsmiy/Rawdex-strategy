@@ -385,6 +385,21 @@ async function verifyVictoryRings(page){
     console.log('Быстрые приказы не меняют скорость отрядов. Все три индикатора показывают прогресс и цвет своего лидера.');
     await page.keyboard.press('Escape');
     await page.keyboard.press('Home');
+    await page.evaluate(()=>{
+     const scale=cam.scale;
+     const redraw=scale=>{cam.scale=scale/WORLD_SCALE;renderLabels()};
+     try{
+      redraw(.0073);if(labelsJob&&labelStep(Infinity))labelsJob=null;
+      for(const scale of [.00699,.00701,.00699,.00701]){
+       redraw(scale);
+       if(labelsJob||labelMeta.overview)throw Error('Label mode flickers inside the zoom threshold band');
+      }
+      redraw(.0067);
+      if(!labelsJob?.overview)throw Error('Overview label update did not start');
+      redraw(.0073);
+      if(labelsJob||labelMeta.overview)throw Error('Obsolete overview labels survived a zoom reversal');
+     }finally{cam.scale=scale;dirtyLabels=true}
+    });
     // Зум колесом: метки не должны исчезать/мигать при движении камеры.
     await page.mouse.move(960,540);
     const zoomCounts=[];

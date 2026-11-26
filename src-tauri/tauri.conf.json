@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Балтийские пути",
-  "version": "1.2.1",
+  "version": "1.2.5",
   "identifier": "com.rawdex.balticroads",
   "build": {
     "frontendDist": "../dist"

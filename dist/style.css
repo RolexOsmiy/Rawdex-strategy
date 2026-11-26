@@ -786,7 +786,6 @@ aside.duchy-card[hidden],.duchy-card [hidden]{display:none}
 @media(max-width:880px){.council-map-picker{top:104px}}
 @media(max-width:360px){.council-map-picker{gap:6px;padding:8px}}
 
-#scenario-title{display:block;max-width:clamp(110px,13vw,224px);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 
 /* The goldwork and walnut texture are shared by both campaigns. */
 header{
@@ -937,3 +936,99 @@ header button.subtle:hover,header .notifications-toggle:hover{background:#624929
 
 .vassal-border-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 #labels{z-index:3}
+/* Campaign standings and victory countdowns */
+.realm-power-board,.campaign-threats{
+ position:absolute;z-index:6;top:78px;right:14px;width:min(212px,42vw);
+ color:var(--ivory);font:12px/1.35 var(--copy)
+}
+.realm-power-board[hidden],.campaign-threats[hidden]{display:none}
+.realm-power-board{background:#172821c9;border:1px solid #8d826770;border-radius:7px;box-shadow:0 4px 14px #0005}
+.realm-power-board summary{padding:7px 9px;color:var(--brass);cursor:pointer;font-weight:700}
+.realm-power-board ol{padding:2px 5px 5px;margin:0;list-style:none;overflow:auto;max-height:min(40dvh,370px)}
+.realm-power-board button{
+ display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;gap:7px;
+ width:100%;padding:4px 5px;background:none;color:inherit;text-align:left;font:inherit;border:1px solid transparent;border-radius:4px
+}
+.realm-power-board button:hover,.realm-power-board button:focus-visible{background:#c9b68d22;border-color:var(--rule)}
+.realm-power-board button[data-power-owner="you"]{color:var(--brass)}
+.realm-power-board button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.realm-power-board button i{width:8px;height:8px;border-radius:50%;box-shadow:0 0 0 1px #e5d4ab6b}
+.realm-power-board button b{font-variant-numeric:tabular-nums}
+.campaign-threats{right:234px;display:grid;gap:4px;width:min(245px,46vw)}
+.campaign-threats button{
+ display:grid;gap:2px;padding:6px 8px;text-align:left;background:#1c2b25ea;color:var(--ivory);
+ border:1px solid #9d9173a8;border-left:3px solid var(--victory-kind);border-radius:5px;font:inherit
+}
+.campaign-threats button strong,.recap-heading h2[data-path],#campaign-result-title[data-path]{color:var(--victory-kind)}
+.campaign-threats .trade,[data-path="trade"]{--victory-kind:#b7c792}
+.campaign-threats .diplomacy,[data-path="diplomacy"]{--victory-kind:#92c5ca}
+[data-path="military"]{--victory-kind:#dfaa8d}
+.recap-heading #recap-winner{margin:5px 0 0;color:var(--ivory)}
+.campaign-path p{margin:7px 0 0}
+.campaign-path-status,.campaign-rival button{color:var(--campaign-accent)}
+.campaign-rival{margin-top:9px;padding-top:7px;border-top:1px solid var(--rule)}
+.campaign-rival button{padding:3px 6px;font:inherit;font-weight:700}
+.campaign-rival small{display:block;margin-top:4px;color:var(--quiet)}
+@media(max-width:880px){
+ .realm-power-board,.campaign-threats{top:104px}
+ .campaign-threats{right:calc(min(212px,42vw) + 18px)}
+}
+
+.domain-shortcut.domain-overloaded #lands{color:#ffae88}
+#domain-priority[aria-pressed="true"]{border-color:var(--brass);color:var(--brass)}
+/* Engraved command bar and semantic game values. */
+#app>header{
+ background:linear-gradient(#150e0840,#0a08074a),url("ui/carved-toolbar.png") center/460px 100% repeat-x;
+ border-color:#9d7950;
+}
+#app>header .brand{min-width:0;padding-inline:8px;flex:none}
+#app>header .brand>.crest{display:grid}
+#app>header .resource-bar{background:#241b12e8}
+.realm-power-board{top:50%;transform:translateY(-50%)}
+.victory-ring[data-victory-path="military"]{--victory-icon-color:#ff8a77}
+.victory-ring[data-victory-path="diplomacy"]{--victory-icon-color:#88ccff}
+.victory-ring[data-victory-path="trade"]{--victory-icon-color:#ffdb72}
+.victory-icon{
+ color:var(--victory-icon-color);
+ background:color-mix(in srgb,var(--victory-icon-color) 14%,#171d1e);
+}
+.victory-ring:hover .victory-icon,.victory-ring:focus-visible .victory-icon{
+ background:color-mix(in srgb,var(--victory-icon-color) 24%,#171d1e);
+}
+.garrison-badge[style*="--unit-faction"]{
+ color:#fff4db;border-color:color-mix(in srgb,var(--unit-faction) 70%,#e5d5a9);
+ background:color-mix(in srgb,var(--unit-faction) 64%,#13191c);
+}
+[data-game-stat="grain"],#stock-grain .resource-values b,#stock-grain .resource-name{color:#ead18a}
+[data-game-stat="wood"],#stock-wood .resource-values b,#stock-wood .resource-name{color:#b9d995}
+[data-game-stat="iron"],#stock-iron .resource-values b,#stock-iron .resource-name{color:#c7d8e6}
+[data-game-stat="cloth"],#stock-cloth .resource-values b,#stock-cloth .resource-name{color:#deb9ed}
+[data-game-stat="gold"],#money{color:#ffd37d}
+[data-game-stat="income"],.duchy-income b{color:#bbdda1}
+[data-game-stat="jobs"]{color:#9fdfc9}
+[data-game-stat="housing"],.housing-cap{color:#b4d9fb}
+[data-game-stat="military"]{color:#eec68e}
+[data-game-stat="loss"],#gold-rate[data-negative="true"]{color:#feb19b}
+
+.tool .cost[data-game-stat="gold"]{color:#ffd37d}
+[data-game-stat][data-trend="negative"]{color:#feb19b}
+.general-picker{display:grid;gap:4px;margin:6px 0;color:#e4cd9a;font-size:12px}
+.general-picker select{width:100%;padding:5px 6px;background:#172b2d;color:#f4e6c6;border:1px solid #9d8a61;border-radius:4px;font:inherit}
+.march-badge{
+ display:inline-flex;align-items:center;gap:4px;min-width:58px;min-height:31px;padding:2px 5px 2px 3px;
+ border-radius:5px;box-shadow:0 2px 6px #000d,inset 0 0 0 1px #f4e4bc28;
+ background:linear-gradient(#19212316,#12191d60),color-mix(in srgb,var(--unit-faction,#718784) 69%,#142128)
+}
+.army-unit-emblem{display:grid;place-items:center;width:20px;height:25px;color:#ffe5b4;flex:none}
+.army-unit-emblem svg{width:19px;height:22px;display:block}
+.army-unit-values{display:grid;text-align:left;line-height:1;gap:2px}
+.army-unit-values small{font:600 8px/1 var(--copy);white-space:nowrap;color:#ffe8bc}
+.army-unit-values b{font:700 15px/.95 var(--display);font-variant-numeric:tabular-nums}
+.cargo-badge,.cargo-badge.cargo-trade,.cargo-badge.cargo-petition{
+ min-width:16px;min-height:16px;width:16px;height:16px;padding:0;line-height:1;
+ border-width:1px;border-radius:4px;font-size:10px;opacity:.64;box-shadow:0 1px 2px #0006
+}
+.cargo-badge>span:first-child{display:grid;place-items:center;width:100%;height:100%}
+.cargo-badge .resource-art{width:12px;height:12px}
+.cargo-badge .cargo-count{display:none}
+.cargo-badge:hover,.cargo-badge:focus-visible,.cargo-badge.selected{opacity:1;z-index:2}

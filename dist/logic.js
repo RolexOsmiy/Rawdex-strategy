@@ -33,7 +33,7 @@ const LAND_NAMES={field:'Равнина',forest:'Лес',mountain:'Горы'};
 function terrainFeatures(x,z){const forest=Math.sin(x*.009+Math.sin(z*.012)*1.6)+Math.cos(z*.014-x*.008)+.35*Math.sin(x*.027+z*.023),belt=GAME_MAP?GAME_MAP.ridges.reduce((height,[rx,rz,radius,peak])=>Math.max(height,peak/75*Math.exp(-((x-rx)**2+(z-rz)**2)/radius**2)),0):Math.exp(-Math.pow((z-590)/105,2)),ridge=.5+.5*Math.cos(x*.022+Math.sin(z*.012)*1.1),peaks=Math.pow(Math.max(0,Math.cos(x*.04+z*.018)*Math.cos(z*.029-x*.008)),2),hills=(Math.sin(x*.014+z*.006)+Math.cos(z*.019-x*.004)+2)/4;return {forest,belt,ridge,peaks,hills}}
 function terrainHeight(x,z){const f=terrainFeatures(x,z);return 3+f.hills*8+f.belt*(14+f.ridge*34+f.peaks*33)}
 function terrainAt(x,z){const f=terrainFeatures(x,z);if(f.belt*(7+f.ridge*14+f.peaks*16)>13)return 'mountain';return f.forest<-.35?'forest':'field'}
-function productivity(type,terrain){const m={grain:{field:1.2,forest:.8,mountain:.6},wood:{field:.8,forest:1.3,mountain:.7},iron:{field:.8,forest:.9,mountain:1.4},cloth:{field:1,forest:1,mountain:.9}};return m[type]?{multiplier:m[type][terrain],rate:Math.round(10*m[type][terrain])}:null}
+function productivity(type,terrain){const m={grain:{field:1.1,forest:.7,mountain:.5},wood:{field:.8,forest:1.3,mountain:.7},iron:{field:.8,forest:.9,mountain:1.4},cloth:{field:1,forest:1,mountain:.9}};return m[type]?{multiplier:m[type][terrain],rate:Math.round(10*m[type][terrain])}:null}
 function inRing(x,z,p){let hit=false;for(let i=0,j=p.length-1;i<p.length;j=i++){const a=p[i],b=p[j];if((a[1]>z)!=(b[1]>z)&&x<(b[0]-a[0])*(z-a[1])/(b[1]-a[1])+a[0])hit=!hit}return hit}
 // The basemap distinguishes the Baltic from unplayable neighboring land.
 const BALTIC=[[0,0],[800,0],[800,50],[640,50],[620,45],[595,50],[565,50],[535,55],[510,55],[490,55],[485,115],[478,155],[460,165],[430,168],[400,170],[375,165],[355,160],[345,190],[340,225],[330,255],[305,280],[265,290],[230,290],[190,290],[150,285],[120,265],[0,265]];
@@ -963,10 +963,10 @@ function initializeCampaign(state,map){
   rules:{partners,baseIncome,
    turnover:Math.round((mediterranean?3900:3000)*marketScale),repeatSales:2,
    stability:72,
-   allies:Math.min(3,rivals),tradeHold:180,diplomaticHold:195,diplomaticCapitalLevel:2,minTime:180},
+   allies:Math.min(3,rivals),tradeHold:180,tradeGrace:30,diplomaticHold:195,allianceAge:60,diplomaticCapitalLevel:2,minTime:180},
   startingCapitals,
   trades:new Map(), turnover:new Map(), relations:new Map(), embassies:new Map(), pacts:new Map(),
-  holds:new Map(), progress:new Map(), pressure:null, result:null, exploring:false, charter:null
+  holds:new Map(), progress:new Map(), embargoes:new Set(), pressure:null, result:null, exploring:false, charter:null
  };
  updateCampaign(state,0);
 }
@@ -1147,9 +1147,19 @@ function campaignAllianceCheck(state,a,b,coalitionAgainst=null){
 function formCampaignAlliance(state,a,b,against=null){
  const check=campaignAllianceCheck(state,a,b,against);
  if(!check.ok)return check;
- state.campaign.pacts.set(warKey(a,b),{a,b,against});
+ state.campaign.pacts.set(warKey(a,b),{a,b,against,since:state.economy.seconds});
  state.onCampaignPact?.(a,b,against);
  return {ok:true};
+}
+function campaignTradeEmbargo(state,a,b){
+ return state.campaign?.embargoes?.has(warKey(a,b))??false;
+}
+function breakCampaignAlliance(state,other){
+ const c=state.campaign,key=warKey('you',other);
+ if(!c?.pacts.delete(key))return false;
+ c.relations.set(key,{trust:0,next:state.economy.seconds});
+ updateCampaign(state,0);
+ return true;
 }
 function militaryCampaignTarget(state,region){
  return !!state.campaign?.startingCapitals?.has(region.id);
@@ -1174,44 +1184,58 @@ function updateCampaign(state,dt,captureId=null){
  const alliesByOwner=new Map(owners.map(id=>[id,[]]));
  for(const [key,pact] of c.pacts){
   if(!nationSet.has(pact.a)||!nationSet.has(pact.b)||isAtWar(state,pact.a,pact.b)){c.pacts.delete(key);continue}
-  alliesByOwner.get(pact.a).push(pact.b);
-  alliesByOwner.get(pact.b).push(pact.a);
+  const matureAt=(pact.since??-Infinity)+rules.allianceAge;
+  alliesByOwner.get(pact.a).push({owner:pact.b,matureAt});
+  alliesByOwner.get(pact.b).push({owner:pact.a,matureAt});
  }
  const cap=(n,max)=>max>0?Math.min(1,n/max):0;
  const requiredCapitals=c.startingCapitals.size;
  let leader=null,pressure=null,winner=null;
- const pathLeaders={};
+ const pathLeaders={},threats={},previousProgress=c.progress;
+ c.progress=new Map();
  for(const owner of owners){
   const lands=regionByOwner.get(owner)||[],held=capitalsByOwner.get(owner)||[];
   const holdsOwn=held.some(region=>c.startingCapitals.get(region.id)===owner);
   const sales=(c.trades.get(owner)||[]).filter(s=>now-s.time<CAMPAIGN_TRADE_WINDOW);
   if(c.trades.has(owner))c.trades.set(owner,sales);
-  const activeSales=sales.filter(s=>nationSet.has(s.buyer)&&!isAtWar(state,owner,s.buyer));
+  const activeSales=sales.filter(s=>nationSet.has(s.buyer)&&!isAtWar(state,owner,s.buyer)&&!campaignTradeEmbargo(state,owner,s.buyer));
   const counts=new Map();
   for(const sale of activeSales)counts.set(sale.buyer,(counts.get(sale.buyer)||0)+1);
   const buyers=[...counts.keys()],repeatBuyers=buyers.filter(id=>counts.get(id)>=rules.repeatSales);
   const income=activeSales.reduce((sum,s)=>sum+s.value,0)*60/CAMPAIGN_TRADE_WINDOW;
   const turnover=c.turnover?.get(owner)||0;
-  const allies=alliesByOwner.get(owner);
+  const activeAlliances=alliesByOwner.get(owner);
+  const allies=activeAlliances.filter(pact=>pact.matureAt<=now).map(pact=>pact.owner);
   const capitalId=owner==='you'?state.capitalId:state.factions[owner].regionId;
   const home=lands.find(r=>r.id===capitalId);
   const homeLevel=home?.buildings.find(b=>b.type==='city'&&b.capital)?.level||1;
-  const peaceful=!!home&&(!state.sieges?.has(home.id)||state.sieges.get(home.id).status==='abandoned')&&duchyStability(home,guards.get(home.id))>=rules.stability;
-  const requiredPartners=Math.min(rules.partners,nationSet.size-1);
+  const besieged=!!home&&state.sieges?.has(home.id)&&state.sieges.get(home.id).status!=='abandoned';
+  const stability=home?duchyStability(home,guards.get(home.id)):0;
+  const peaceful=!!home&&!besieged&&stability>=rules.stability;
+  const requiredPartners=rules.partners;
   const requiredIncome=Math.round(rules.baseIncome*(.22+.26*requiredPartners));
   const eligibleTrade=requiredPartners>0&&repeatBuyers.length>=requiredPartners&&income>=requiredIncome&&turnover>=rules.turnover;
   const eligibleDiplomacy=allies.length>=rules.allies&&peaceful&&homeLevel>=rules.diplomaticCapitalLevel;
-  const heldFor=c.holds.get(owner)||{trade:0,diplomacy:0};
-  heldFor.trade=eligibleTrade?Math.min(rules.tradeHold,heldFor.trade+dt):0;
+  const heldFor=c.holds.get(owner)||{trade:0,diplomacy:0,tradeInterrupted:0};
+  if(eligibleTrade){
+   heldFor.trade=Math.min(rules.tradeHold,heldFor.trade+dt);
+   heldFor.tradeInterrupted=0;
+  }else if(heldFor.trade>0){
+   heldFor.tradeInterrupted=(heldFor.tradeInterrupted||0)+dt;
+   if(heldFor.tradeInterrupted>=rules.tradeGrace){heldFor.trade=0;heldFor.tradeInterrupted=0}
+  }
   heldFor.diplomacy=eligibleDiplomacy?Math.min(rules.diplomaticHold,heldFor.diplomacy+dt):0;
   c.holds.set(owner,heldFor);
   const paths={
-   trade:{buyers,repeatBuyers,income,turnover,requiredPartners,requiredIncome,held:heldFor.trade,ready:heldFor.trade>=rules.tradeHold,
+   trade:{buyers,repeatBuyers,income,turnover,requiredPartners,requiredIncome,held:heldFor.trade,ready:eligibleTrade&&heldFor.trade>=rules.tradeHold,
+    eligible:eligibleTrade,remaining:Math.max(0,rules.tradeHold-heldFor.trade,rules.minTime-now),
+    blockedFor:eligibleTrade||!heldFor.trade?0:Math.max(0,rules.tradeGrace-(heldFor.tradeInterrupted||0)),
     score:.12*cap(buyers.length,requiredPartners)+.25*cap(repeatBuyers.length,requiredPartners)+
      .25*cap(income,requiredIncome)+.23*cap(turnover,rules.turnover)+.15*cap(heldFor.trade,rules.tradeHold)},
    military:{held,holdsOwn,requiredCapitals,ready:requiredCapitals>1&&held.length===requiredCapitals,
     score:requiredCapitals>1?cap(held.length,requiredCapitals):0},
-   diplomacy:{allies,peaceful,homeLevel,held:heldFor.diplomacy,ready:heldFor.diplomacy>=rules.diplomaticHold,
+   diplomacy:{allies,activeAlliances,peaceful,stability,besieged,homeLevel,held:heldFor.diplomacy,ready:heldFor.diplomacy>=rules.diplomaticHold,
+    eligible:eligibleDiplomacy,remaining:Math.max(0,rules.diplomaticHold-heldFor.diplomacy,rules.minTime-now),
     score:.70*cap(allies.length,rules.allies)+.06*Number(peaceful)+.09*Number(homeLevel>=rules.diplomaticCapitalLevel)+.15*cap(heldFor.diplomacy,rules.diplomaticHold)}
   };
   c.progress.set(owner,paths);
@@ -1223,6 +1247,12 @@ function updateCampaign(state,dt,captureId=null){
    else if(entry.score===pathLeader.score)pathLeader.owners.push(owner);
    const danger=path==='military'&&held.length<=Number(holdsOwn)?0:entry.score;
    if(path!=='diplomacy'&&danger>=.57&&(!pressure||danger>pressure.score))pressure={owner,path,score:danger};
+   if(owner!=='you'&&path!=='military'&&(paths[path].eligible||paths[path].blockedFor>0)){
+    const candidate={owner,path,remaining:paths[path].remaining,blockedFor:paths[path].blockedFor||0};
+    const current=threats[path];
+    if(!current||Number(!!candidate.blockedFor)<Number(!!current.blockedFor)||!!candidate.blockedFor===!!current.blockedFor&&candidate.remaining<current.remaining)threats[path]=candidate;
+    if(paths[path].eligible&&!previousProgress.get(owner)?.[path]?.eligible&&!previousProgress.get(owner)?.[path]?.blockedFor)state.onCampaignCountdown?.(candidate);
+   }
    if(paths[path].ready){
     if(path==='military')winner={...entry,regionId:captureId};
     else if(!winner&&!state.defeated&&now>=rules.minTime)winner=entry;
@@ -1231,6 +1261,7 @@ function updateCampaign(state,dt,captureId=null){
  }
  c.leader=leader;
  c.pathLeaders=pathLeaders;
+ c.threats=threats;
  c.pressure=pressure;
  if(winner){
   c.result={...winner,time:now};
@@ -1238,7 +1269,7 @@ function updateCampaign(state,dt,captureId=null){
  }
 }
 
-function initializeEconomy(state,region){state.council=createRealmCouncil(region.id);state.vassals=new Map();state.nextVassalId=0;state.capitalId=region.id;state.realmRank='duchy';state.garrisons={};state.recruitments=[];state.recruitRallies=new Map();state.nextRecruitmentId=0;state.armyMoves=[];state.fieldArmies=[];state.warships=[];state.wars={};state.warRecords={};state.peaceTreaties={};state.transit={};state.battlePairs=[];state.sieges=new Map();state.notifications=[];state.nextNotificationId=0;state.defeated=false;state.economy={stocks:{grain:24,wood:10,iron:8,cloth:8,equipment:0},industryReserve:0,equipmentReserve:0,shipments:[],seconds:0,tradeClock:0,tradeEarned:0,tradeSpent:0,tradeStats:{land:{count:0,revenue:0},sea:{count:0,revenue:0},ports:{}},regionDeliveries:{},exportPolicy:{wood:'trade',iron:'trade',cloth:'trade'},events:[],grainFlow:[],roadTraffic:new Map(),grainPolicy:'growth',growthRate:.012,actualGrowthRate:.012};region.control=100;region.mood=20;let capital=region.buildings.find(b=>b.capital);if(capital)capital.population=1000}
+function initializeEconomy(state,region){state.domainPriority=[];state.domainWarning=0;state.council=createRealmCouncil(region.id);state.vassals=new Map();state.nextVassalId=0;state.capitalId=region.id;state.realmRank='duchy';state.garrisons={};state.recruitments=[];state.nextRecruitmentId=0;state.armyMoves=[];state.fieldArmies=[];state.warships=[];state.wars={};state.warRecords={};state.peaceTreaties={};state.transit={};state.battlePairs=[];state.sieges=new Map();state.notifications=[];state.nextNotificationId=0;state.defeated=false;state.economy={stocks:{grain:24,wood:10,iron:8,cloth:8,equipment:0},industryReserve:0,equipmentReserve:0,shipments:[],seconds:0,tradeClock:0,tradeEarned:0,tradeSpent:0,tradeStats:{land:{count:0,revenue:0},sea:{count:0,revenue:0},ports:{}},regionDeliveries:{},exportPolicy:{wood:'trade',iron:'trade',cloth:'trade'},events:[],grainFlow:[],roadTraffic:new Map(),grainPolicy:'growth',growthRate:.012,actualGrowthRate:.012};region.control=100;region.mood=20;let capital=region.buildings.find(b=>b.capital);if(capital)capital.population=1000}
 function distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
 function segmentWithin(r,a,b){let d=distance(a,b),steps=Math.max(1,Math.ceil(d/1.2));for(let i=0;i<=steps;i++){let t=i/steps;if(!insideRegion(r,a.x+(b.x-a.x)*t,a.z+(b.z-a.z)*t))return false}return true}
 function routeWithin(r,from,to,allowsSegment=segmentWithin){
@@ -1312,12 +1343,12 @@ function pointAtRouteDistance(path,target){
  const ratio=length?(target-distances[low-1])/length:0;
  return {x:a.x+(b.x-a.x)*ratio,z:a.z+(b.z-a.z)*ratio};
 }
-// Trading reach grows with the same economic and military power shown in the HUD.
-function tradeRange(state,owner='you'){let strength;if(typeof factionPower==='function')strength=factionPower(state,owner).total;else{let owned=state.regions.filter(r=>r.owner===owner),pop=0,production=0;for(const r of owned){const workforce=workforceReport(r);pop+=regionalPopulation(r);for(const b of r.buildings)if(b.product&&b.route?.length)production+=productionRate(r,b,workforce)}strength=owned.length*100+pop*.1+production*3+armyTroops(state,owner)*.5+Math.max(0,Math.min(1000,factionLedger(state,owner)?.gold||0))*.04}return Math.min(1300,Math.floor(420+strength*.4))}
+// Trading reach uses the historical scale for existing trade routes.
+function tradeRange(state,owner='you'){let owned=state.regions.filter(r=>r.owner===owner),pop=0,production=0;for(const r of owned){const workforce=workforceReport(r);pop+=regionalPopulation(r);for(const b of r.buildings)if(b.product&&b.route?.length)production+=productionRate(r,b,workforce)}const strength=owned.length*100+pop*.1+production*3+armyTroops(state,owner)*.5+Math.max(0,Math.min(1000,factionLedger(state,owner)?.gold||0))*.04;return Math.min(1300,Math.floor(420+strength*.4))}
 function tradePremium(path){return 1+Math.min(.5,routeLength(path)/1600)}
 function tradePartnerAlive(state,id){let f=state.factions?.[id];return !!f&&!f.defeated&&!f.isRebel&&state.regions.some(r=>r.id===f.regionId&&r.owner===id&&r.buildings?.some(b=>b.type==='city'))}
 function exportDestinationOpen(state,ship){
- if(!campaignNationAlive(state,ship.buyer)||isAtWar(state,shipmentOwner(ship),ship.buyer))return false;
+ if(!campaignNationAlive(state,ship.buyer)||isAtWar(state,shipmentOwner(ship),ship.buyer)||campaignTradeEmbargo(state,shipmentOwner(ship),ship.buyer))return false;
  if(ship.mode!=='sea'){
   return ship.destinationRegionId==null||state.regions.some(r=>r.id===ship.destinationRegionId&&r.owner===ship.buyer&&
    r.buildings.some(b=>b.type==='city'));
@@ -1329,6 +1360,7 @@ function exportDestinationOpen(state,ship){
 function ensureExportDestination(state,ship){
  if(exportDestinationOpen(state,ship))return true;
  return ship.mode!=='sea'&&campaignNationAlive(state,ship.buyer)&&!isAtWar(state,shipmentOwner(ship),ship.buyer)&&
+  !campaignTradeEmbargo(state,shipmentOwner(ship),ship.buyer)&&
   !!state.retargetLandExport?.(ship);
 }
 function returnTradeShipment(state,ship){
@@ -1379,7 +1411,7 @@ function realmPromotionCheck(state,owner='you'){
  let lands=state.regions.filter(r=>r.owner===owner).length,capitalId=owner==='you'?state.capitalId:state.factions[owner].regionId,capital=state.regions.find(r=>r.id===capitalId&&r.owner===owner),city=capital?.buildings?.find(b=>b.type==='city'&&b.capital),level=city?.level||1,ledger=factionLedger(state,owner),missing=[];
  if(!city)missing.push('нужна столица');if(lands<next.requiredLands)missing.push('земли '+lands+'/'+next.requiredLands);if(city&&level<next.capitalLevel)missing.push('столица '+level+'/'+next.capitalLevel+' ур.');if(!ledger||ledger.gold<next.cost)missing.push('золото '+Math.floor(ledger?.gold||0)+'/'+next.cost);return {ok:missing.length===0,current,next,lands,capital,city,level,missing,reason:missing.join(' · ')};
 }
-function promoteRealm(state,owner='you'){let check=realmPromotionCheck(state,owner);if(!check.ok)return check;let ledger=factionLedger(state,owner);ledger.gold-=check.next.cost;if(owner==='you'){state.realmRank=check.next.id;pushNotification(state,{kind:'economy',title:'Новый ранг державы',body:check.next.name+' · размер домена '+check.next.capacity+'.',regionId:state.capitalId})}else state.factions[owner].realmRank=check.next.id;state.onRealmPromoted?.({owner,rank:check.next});return {...check,ok:true}}
+function promoteRealm(state,owner='you'){let check=realmPromotionCheck(state,owner);if(!check.ok)return check;let ledger=factionLedger(state,owner);ledger.gold-=check.next.cost;if(owner==='you'){state.realmRank=check.next.id;pushNotification(state,{kind:'economy',title:'Новый ранг державы',body:check.next.name+' · размер домена '+check.next.capacity+'.',regionId:state.capitalId})}else state.factions[owner].realmRank=check.next.id;stepControl(state,0);state.onRealmPromoted?.({owner,rank:check.next});return {...check,ok:true}}
 const CONTROL_TIME=180;
 function controlEfficiency(region){let value=Number.isFinite(region?.control)?region.control:100;return .6+.4*Math.max(0,Math.min(100,value))/100}
 function realmAdministration(state,owner){
@@ -1410,16 +1442,34 @@ function realmAdministration(state,owner){
   for(const hub of hubs)best=Math.min(best,distances.get(hub.id)+2);
   if(Number.isFinite(best)){distances.set(r.id,best);sea.add(r.id)}
  }
- const capacity=realmRank(state,owner).capacity,direct=lands.filter(r=>!vassalFor(state,r)).length;
- const burden=Math.min(21,Math.round(Math.max(0,direct-capacity)*3/realmMapScale(state)));
- return {capital,distances,capacity,burden,sea};
+ const capacity=realmRank(state,owner).capacity;
+ const priorities=owner==='you'?state.domainPriority||[]:[];
+ const directLands=lands.filter(r=>!vassalFor(state,r));
+ const direct=directLands.length,excess=Math.max(0,direct-capacity),overload=excess/capacity;
+ const yieldFactor=Math.max(.2,1/(1+1.25*overload));
+ const excessLands=new Map();
+ if(excess){
+  const priority=id=>id===capital?priorities.length+1:priorities.indexOf(id)+1;
+  directLands.sort((a,b)=>priority(b.id)-priority(a.id)||
+   (distances.get(a.id)??Infinity)-(distances.get(b.id)??Infinity)||a.id-b.id);
+  directLands.slice(capacity).forEach((region,index)=>excessLands.set(region.id,Math.min(88,Math.round(24+38*overload+3*index))));
+ }
+ return {capital,distances,capacity,direct,excess,overload,yieldFactor,excessLands,sea};
+}
+function toggleDomainPriority(state,region){
+ const capacity=realmRank(state).capacity;
+ if(capacity<=1||!region||region.owner!=='you'||region.id===state.capitalId||vassalFor(state,region))return;
+ const current=(state.domainPriority||[]).filter(id=>state.regions.some(r=>r.id===id&&r.owner==='you'&&r.id!==state.capitalId&&!vassalFor(state,r)));
+ state.domainPriority=current.includes(region.id)?current.filter(id=>id!==region.id):
+  [...current,region.id].slice(1-capacity);
+ stepControl(state,0);
 }
 function controlReport(state,region,administration){
  if(!region||!region.owner||region.owner==='neutral')return null;
  const admin=administration||realmAdministration(state,region.owner);
- const {capital,distances,capacity,burden:realmBurden}=admin;
+ const {capital,distances,capacity,excessLands,yieldFactor}=admin;
  const dist=distances.get(region.id),isCapital=region.id===capital,buildings=region.buildings||[];
- const vassal=vassalFor(state,region),burden=vassal?0:realmBurden,bySea=admin.sea.has(region.id);
+ const vassal=vassalFor(state,region),burden=excessLands.get(region.id)||0,bySea=admin.sea.has(region.id);
  const infra=Math.min(12,buildings.filter(b=>b.product&&b.route?.length).length*2+
   buildings.filter(b=>b.type==='city').reduce((n,b)=>n+Math.max(0,(b.level||1)-1)*3,0));
  const g=state.garrisons?.[region.id],soldiers=g?.owner===region.owner&&!g.inBattle?g.troops||0:0;
@@ -1427,20 +1477,31 @@ function controlReport(state,region,administration){
  const distancePenalty=vassal?(vassal.seatId===region.id?0:4):dist==null?30:Math.min(24,dist*4);
  const relief=(region.councilReliefUntil||0)> (state.economy?.seconds||0)?6:0;
  const sabotage=(region.sabotageUntil||0)>(state.economy?.seconds||0)?region.sabotageControl:0;
- const target=(isCapital?100:Math.max(35,Math.min(100,88-distancePenalty-burden+infra+garrison+relief)))-sabotage;
+ const target=(isCapital?100:Math.max(burden?5:35,Math.min(100,88-distancePenalty-burden+infra+garrison+relief)))-sabotage;
  const value=Number.isFinite(region.control)?region.control:100;
- return {value,target,dist,infra,garrison,burden,capacity,distancePenalty,isCapital,sabotage,sea:bySea,efficiency:controlEfficiency(region)};
+ return {value,target,dist,infra,garrison,burden,capacity,distancePenalty,isCapital,sabotage,sea:bySea,yieldFactor:vassal?1:yieldFactor,efficiency:controlEfficiency(region)};
 }
 function stepControl(state,dt){
  const byOwner=new Map(),recovery=1-Math.exp(-dt/CONTROL_TIME);
  for(const r of state.regions){
   if(r.owner!=='you'&&!state.factions?.[r.owner])continue;
   if(!byOwner.has(r.owner))byOwner.set(r.owner,realmAdministration(state,r.owner));
-  const q=controlReport(state,r,byOwner.get(r.owner));
+  const admin=byOwner.get(r.owner),q=controlReport(state,r,admin);
+  r.domainYield=q.yieldFactor;
+  r.domainBurden=q.burden;
   const now=state.economy?.seconds||0,calming=pacifying(r,now);
   const aided=((r.councilReliefUntil||0)>now||advisorIsWorking(state,'marshal',r)||calming)&&q.target>q.value;
   const target=calming?Math.min(100,q.target+12):q.target;
-  r.control=q.isCapital&&!q.sabotage?100:Math.max(0,Math.min(100,q.value+(target-q.value)*(aided?1-Math.exp(-dt/(CONTROL_TIME*.62)):recovery)));
+  const decline=q.burden&&target<q.value?1-Math.exp(-dt*(1+Math.min(1.25,admin.overload*.6))/CONTROL_TIME):recovery;
+  r.control=q.isCapital&&!q.sabotage?100:Math.max(0,Math.min(100,q.value+(target-q.value)*(aided?1-Math.exp(-dt/(CONTROL_TIME*.62)):decline)));
+ }
+ const player=byOwner.get('you');
+ if(player){
+  const lost=Math.round((1-player.yieldFactor)*100),stage=lost>=70?3:lost>=50?2:lost>0?1:0;
+  if(stage>(state.domainWarning||0))pushNotification(state,{kind:'danger',title:'Домен перегружен',
+   body:player.direct+' из '+player.capacity+' земель · выпуск и налоги −'+lost+'%. Передайте земли вассалам или повысьте ранг державы.',
+   regionId:player.excessLands.keys().next().value??state.capitalId});
+  state.domainWarning=stage;
  }
 }
 const GRAIN_PER_RESIDENT=.006;
@@ -1528,8 +1589,8 @@ function relocateResidents(region,dt,fed){
 const RELIEF_GOLD=20,RELIEF_GRAIN=6,RELIEF_DURATION=120,RELIEF_COOLDOWN=150;
 const PACIFY_GOLD=80,PACIFY_GRAIN=12,PACIFY_SECONDS=120,PACIFY_COOLDOWN=150;
 function moodReport(state,region){
- if(!region||region.owner==='neutral')return null;let owner=region.owner,now=state.economy?.seconds||0,control=Number.isFinite(region.control)?region.control:100,buildings=region.buildings||[],population=buildings.filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0),housing=buildings.reduce((n,b)=>n+cityHousing(b),0),food=state.economy?.granaries?(granaryFor(state,region.id)?.fed??1)<.999:owner==='you'?!!state.economy?.hungry:(state.factions?.[owner]?.stocks?.grain??0)<1,siege=state.sieges?.get(region.id),besieged=!!siege&&siege.defender===owner&&siege.status!=='abandoned',crowded=population>0&&housing>0&&population>=housing*.98,recent=(region.conquestUntil||0)>now,relief=(region.reliefUntil||0)>now,development=Math.min(12,buildings.filter(b=>b.product&&b.route?.length).length*2+buildings.filter(b=>b.type==='city').reduce((n,b)=>n+1+Math.max(0,(b.level||1)-1)*2,0)),controlPenalty=Math.max(0,60-control)*.5,target=Math.max(-100,Math.min(100,20-controlPenalty-(food?45:0)-(besieged?35:0)-(crowded?12:0)-(recent?30:0)+(relief?30:0)+development)),value=Number.isFinite(region.mood)?region.mood:20;
- return {value,target,food,besieged,crowded,recent,relief,development,controlPenalty,reliefRemaining:Math.max(0,(region.reliefUntil||0)-now),cooldown:Math.max(0,(region.reliefCooldownUntil||0)-now)};
+ if(!region||region.owner==='neutral')return null;let owner=region.owner,now=state.economy?.seconds||0,control=Number.isFinite(region.control)?region.control:100,buildings=region.buildings||[],population=buildings.filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0),housing=buildings.reduce((n,b)=>n+cityHousing(b),0),food=state.economy?.granaries?(granaryFor(state,region.id)?.fed??1)<.999:owner==='you'?!!state.economy?.hungry:(state.factions?.[owner]?.stocks?.grain??0)<1,siege=state.sieges?.get(region.id),besieged=!!siege&&siege.defender===owner&&siege.status!=='abandoned',crowded=population>0&&housing>0&&population>=housing*.98,recent=(region.conquestUntil||0)>now,relief=(region.reliefUntil||0)>now,development=Math.min(12,buildings.filter(b=>b.product&&b.route?.length).length*2+buildings.filter(b=>b.type==='city').reduce((n,b)=>n+1+Math.max(0,(b.level||1)-1)*2,0)),controlPenalty=Math.max(0,60-control)*.5,domainPenalty=Math.min(32,Math.round((region.domainBurden||0)*.36)),target=Math.max(-100,Math.min(100,20-controlPenalty-domainPenalty-(food?45:0)-(besieged?35:0)-(crowded?12:0)-(recent?30:0)+(relief?30:0)+development)),value=Number.isFinite(region.mood)?region.mood:20;
+ return {value,target,food,besieged,crowded,recent,relief,development,controlPenalty,domainPenalty,reliefRemaining:Math.max(0,(region.reliefUntil||0)-now),cooldown:Math.max(0,(region.reliefCooldownUntil||0)-now)};
 }
 function duchyStability(region,troops=0){
  const control=Number.isFinite(region?.control)?region.control:100;
@@ -1540,7 +1601,7 @@ function duchyStability(region,troops=0){
  return Math.round(Math.max(0,normal-(region?.treasuryPenalty||0)));
 }
 function moodEfficiency(r){let mood=Number.isFinite(r?.mood)?r.mood:20;return 1+Math.min(0,Math.max(-100,mood))*.0015}
-function economicEfficiency(r){return controlEfficiency(r)*moodEfficiency(r)}
+function economicEfficiency(r){return controlEfficiency(r)*moodEfficiency(r)*(r.domainYield??1)}
 function reliefCheck(state,region,owner='you',purse=null){
  if(!state.started||!region||region.owner!==owner||!state.economy)return {ok:false,reason:'Земля недоступна'};let ledger=factionLedger(state,owner,purse),report=moodReport(state,region);
  if(!ledger)return {ok:false,reason:'Держава недоступна'};if(report.cooldown>0)return {ok:false,reason:'Повторная помощь через '+Math.ceil(report.cooldown)+' сек.'};const missing=costShortfalls(ledger.gold,ledger.stocks,RELIEF_GOLD,{grain:RELIEF_GRAIN});
@@ -1622,18 +1683,19 @@ function unrestReport(state,r,guards=defendingTroopsByRegion(state)){
  const population=regionalPopulation(r)+(r.displacedResidents||0);
  const occupation=settlementReport(state,r),neglected=!!occupation&&(occupation.damaged||!occupation.fed);
  const progress=Math.max(0,Math.min(100,r.unrest||0)),chance=(100-stability)/100;
- const tension=population>=1&&baseStability<UNREST_RECOVERY_STABILITY&&(baseStability<=55||neglected||progress>=35);
- const protectedByArmy=tension&&troops>0;
+ const tension=population>=1&&baseStability<UNREST_RECOVERY_STABILITY&&(baseStability<=55||((r.domainBurden||0)>0&&baseStability<70)||neglected||progress>=35);
+ const requiredTroops=r.domainBurden?Math.min(120,Math.max(30,Math.ceil(population*.05))):1;
+ const protectedByArmy=tension&&troops>=requiredTroops;
  const atRisk=tension&&!protectedByArmy;
  const risk=atRisk&&!cooldown;
  const base=neglected?OCCUPATION_UNREST_SECONDS*(occupation.repairing||!occupation.damaged||occupation.fed?1.65:1):UNREST_SECONDS;
  const dailyRate=100/(pacifying(r,now)?base*2.4:base)*(.5+chance),speed=risk?dailyRate:0;
- return {progress,risk,chance,troops,protectedByArmy,cooldown,population,speed,
+ return {progress,risk,chance,troops,requiredTroops,protectedByArmy,cooldown,population,speed,
   days:atRisk?Math.max(1,Math.ceil((cooldown+(100-progress)/dailyRate)/SECONDS_PER_GAME_DAY)):null};
 }
 function startRebellion(state,region){
  const check=unrestReport(state,region);
- if(!check||check.troops||check.population<1||!duchySeat(region))return {ok:false};
+ if(!check||check.troops>=check.requiredTroops||check.population<1||!duchySeat(region))return {ok:false};
  const owner=region.owner;
  (state.factions??={});(state.wars??={});
  const id='rebels-'+(state.nextRebellionId=(state.nextRebellionId||0)+1);
@@ -1669,7 +1731,7 @@ function stepUnrest(state,dt){
    if(q.risk&&stage>(r.unrestAlertStage||0)){
     r.unrestAlertStage=stage;
     pushNotification(state,{kind:'danger',title:stage===2?'Восстание близко':'Волнения в герцогстве',
-     body:r.name+' · '+Math.floor(r.unrest)+'%. Проверьте продовольствие и состояние столицы.',regionId:r.id});
+     body:r.name+' · '+Math.floor(r.unrest)+'%. '+(r.domainBurden?'Земля сверх лимита домена. Рассмотрите передачу вассалу.':'Проверьте продовольствие и состояние столицы.'),regionId:r.id});
    }else if(r.unrest<15)r.unrestAlertStage=0;
   }
   if(r.unrest>=100&&q.risk){
@@ -1793,11 +1855,11 @@ function populationTotal(state){return state.regions.filter(r=>r.owner==='you').
 function regionEconomy(state,r){const empty=()=>Object.fromEntries(GOODS.map(g=>[g,0])),production=empty(),blocked=empty(),transit=empty(),waiting=empty(),delivered=empty();if(!r)return {population:0,tax:0,grainNeed:0,production,blocked,transit,waiting,delivered};let population=r.buildings.filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0),housing=r.buildings.reduce((n,b)=>n+cityHousing(b),0),workforce=workforceReport(r);for(const b of r.buildings){if(!b.product||!GOODS.includes(b.type))continue;const rate=productionRate(r,b,workforce),kept=b.type==='grain'&&state.economy?.granaries?localGrainShare(r):0;if(b.route?.length)production[b.type]+=rate;else{production[b.type]+=rate*kept;blocked[b.type]+=rate*(1-kept);}waiting[b.type]+=Math.max(0,b.produced||0)}for(const ship of state.economy?.shipments||[])if(ship.kind==='supply'&&ship.owner==='you'&&ship.originRegion===r.id&&ship.marketTransfer==null)for(const [good,amount] of Object.entries(ship.cargo||{[ship.good]:ship.amount}))if(good in transit)transit[good]+=amount;let totals=state.economy?.regionDeliveries?.[r.id];if(totals)for(const g of GOODS)delivered[g]=totals[g]||0;return {population,housing,workforce,tax:duchyTax(state,r),grainNeed:population*.006+(state.garrisons?.[r.id]?.owner==='you'?state.garrisons[r.id].troops*.005:0),production,blocked,transit,waiting,delivered}}
 // Keep capital stocks, goods still at workshops and actual outbound supply distinct.
 function logisticsReport(state){let goods=Object.fromEntries(GOODS.map(g=>[g,{stock:state.economy?.stocks?.[g]||0,production:0,blocked:0,waiting:0,transit:0,shipments:0,blockedShipments:0,seaTransit:0,nextArrival:null}])),blockedBuildings=0;for(const r of state.regions||[])if(r.owner==='you'){const workforce=workforceReport(r);for(const b of r.buildings){let g=goods[b.type];if(!b.product||!g)continue;let rate=productionRate(r,b,workforce),grain=b.type==='grain'&&state.economy?.granaries;if(grain&&r.id!==state.capitalId)rate*=1-localGrainShare(r);else if(vassalFor(state,r))rate*=1-VASSAL_SHARE;if(b.route?.length||grain&&r.id===state.capitalId)g.production+=rate;else if(rate>0){g.blocked+=rate;blockedBuildings++}g.waiting+=Math.max(0,b.produced||0)}}for(const ship of state.economy?.shipments||[]){if(ship.kind!=='supply'||ship.owner!=='you'||ship.supplyMarketId!=null)continue;for(const [good,amount] of Object.entries(ship.cargo||{[ship.good]:ship.amount})){let g=goods[good];if(!g)continue;g.transit+=amount;g.shipments++;if(ship.seaSupply)g.seaTransit+=amount;if(ship.supplyBlocked)g.blockedShipments++;if(!ship.supplyBlocked){let eta=Math.max(0,ship.duration-ship.elapsed);g.nextArrival=g.nextArrival==null?eta:Math.min(g.nextArrival,eta)}}}return {goods,blockedBuildings}}
-const GRAIN_FLOW_WINDOW=30,BASE_GROWTH=.009,MAX_NATURAL_GROWTH=.06;
+const GRAIN_FLOW_WINDOW=30,BASE_GROWTH=.01,LOCAL_HARVEST_GROWTH=.003,GRAIN_SPOILAGE=.20;
 // Frontier catch-up: settlements below this population grow noticeably faster
 // (with a floor on the jobs factor), so new territories can reach a workable
 // population — enough to raise troops — instead of stalling at a few hundred.
-const FRONTIER_POP=1000,FRONTIER_JOB_FLOOR=.6,FRONTIER_GROWTH_MULT=12;
+const FRONTIER_POP=1000,FRONTIER_JOB_FLOOR=.6,FRONTIER_GROWTH_MULT=30;
 function recordGrainFlow(state,amount,regionId=state.capitalId){
  const e=state.economy;
  if(!e||!Number.isFinite(amount)||!amount)return;
@@ -1805,40 +1867,33 @@ function recordGrainFlow(state,amount,regionId=state.capitalId){
  e.grainFlow.push(event);
  granaryFor(state,regionId)?.flow.push(event);
 }
-function foodGrowthMetrics(need,stock,flow,now){
- const window=Math.max(8,Math.min(GRAIN_FLOW_WINDOW,now));
- const delivered=Math.max(0,flow.reduce((sum,event)=>sum+event.amount,0)*60/window);
- const surplus=Math.max(0,delivered-need),ratio=need>0?(delivered-need)/need:0;
- const reserveCoverage=need>0?Math.min(1,Math.max(0,stock)/(need*8)):0;
- const reserveBonus=.012*reserveCoverage,bonus=Math.min(.036,.027*Math.log1p(Math.max(0,ratio)));
- const shortfallPenalty=.09*Math.min(1,Math.max(0,-ratio))*(1-.75*reserveCoverage);
- return {need,delivered,surplus,ratio,bonus,reserveBonus,shortfallPenalty,rate:Math.min(MAX_NATURAL_GROWTH,BASE_GROWTH+reserveBonus+bonus-shortfallPenalty)};
+function localHarvestGrowth(need,harvest){
+ return need>0?LOCAL_HARVEST_GROWTH*Math.max(0,Math.min(1,(harvest/need-1)*4)):0;
 }
 function grainGrowthMetrics(state){
- const e=state.economy,need=populationTotal(state)*.006+garrisonGrainNeed(state);
- if(!e)return {need,delivered:0,surplus:0,bonus:0,rate:BASE_GROWTH,reserveBonus:0,shortfallPenalty:0};
- return foodGrowthMetrics(need,e.stocks.grain||0,e.grainFlow,e.seconds||0);
+ const e=state.economy,need=populationTotal(state)*GRAIN_PER_RESIDENT+garrisonGrainNeed(state);
+ const window=Math.max(8,Math.min(GRAIN_FLOW_WINDOW,e?.seconds||0));
+ const delivered=(e?.grainFlow||[]).reduce((sum,event)=>sum+event.amount,0)*60/window;
+ const bonus=localHarvestGrowth(need,granaryFor(state,state.capitalId)?.harvestRate||0);
+ return {need,delivered,bonus,rate:BASE_GROWTH+bonus};
 }
-
+function grainStorageCapacity(state,region,need=regionGrainNeed(state,region)){
+ const capital=region.id===realmCapitalId(state,region.owner);
+ const settings=region.owner==='you'?state.economy:state.factions?.[region.owner];
+ const armyReserve=capital&&settings?.grainPolicy==='army';
+ return Math.ceil(Math.max(armyReserve?60:35,need*(armyReserve?6:4))+(region.store?.level||0)*30);
+}
 function grainReserve(state,owner='you'){
- const economy=state.economy,settings=owner==='you'?economy:state.factions?.[owner];
+ const settings=owner==='you'?state.economy:state.factions?.[owner];
  const capital=councilRegion(state,realmCapitalId(state,owner),owner);
- if(economy?.granaries){
-  const need=capital?(granaryFor(state,capital.id)?.need??regionGrainNeed(state,capital)):0;
-  return Math.max(settings?.grainPolicy==='trade'?TRADE_RESERVE.grain:60,Math.ceil(need*(settings?.grainPolicy==='army'?4:1.5)));
- }
- const need=state.regions.filter(r=>r.owner===owner).reduce((n,r)=>n+regionalPopulation(r)*GRAIN_PER_RESIDENT,0)+garrisonGrainNeed(state,owner);
- return settings?.grainPolicy==='trade'?TRADE_RESERVE.grain:Math.max(60,Math.ceil(need*10));
+ const need=capital?(granaryFor(state,capital.id)?.need??regionGrainNeed(state,capital)):0;
+ const policy=settings?.grainPolicy;
+ return Math.max(policy==='army'?60:12,Math.ceil(need*(policy==='army'?6:policy==='trade'?1.5:2.5)));
 }
-// Keep roughly one minute of local output before automatically selling surpluses.
-function grainReserve(state){
- const e=state.economy;
- if(e?.granaries){
-  const seat=state.regions.find(r=>r.id===state.capitalId);
-  const need=seat?(granaryFor(state,seat.id)?.need??regionGrainNeed(state,seat)):0;
-  return Math.max(e.grainPolicy==='trade'?TRADE_RESERVE.grain:60,Math.ceil(need*(e.grainPolicy==='army'?4:1.5)));
- }
- return e?.grainPolicy==='trade'?TRADE_RESERVE.grain:Math.max(60,Math.ceil((populationTotal(state)*.006+garrisonGrainNeed(state))*10));
+function grainMarketLimit(state,owner,limit){
+ const capital=councilRegion(state,realmCapitalId(state,owner),owner);
+ const need=capital?(granaryFor(state,capital.id)?.need??regionGrainNeed(state,capital)):0;
+ return Math.min(limit,Math.max(12,Math.ceil(need*2.5)));
 }
 // Keep roughly one minute of local output before automatically selling surpluses.
 function tradeReserve(state,good,owner='you',output=null){
@@ -1926,7 +1981,7 @@ function stepArmoryWork(state,workshops,dt){
   }
   if(!a.ready||a.policy==='paused'||!armoryCanWork(a)||a.output>=ARMORY_OUTPUT_CAP)continue;
   const job=workforceReport(region).byBuilding.get(a);
-  a.progress+=work*(job.workers/job.capacity);
+  a.progress+=work*(job.workers/job.capacity)*(region.domainYield??1);
   while(a.progress>=ARMORY_CYCLE&&a.output<ARMORY_OUTPUT_CAP&&armoryCanWork(a)){
    for(const good of MARKET_GOODS)a.stocks[good]-=EQUIPMENT_RECIPE[good];
    a.progress-=ARMORY_CYCLE;
@@ -2176,7 +2231,7 @@ function granaryReport(state,region){
   if(building.route?.length)shipped+=output*(1-share);
   else waiting+=output*(1-share);
  }
- return {stock,need,kept,shipped,waiting,capital:share===1,
+ return {stock,need,kept,shipped,waiting,capital:share===1,storage:grainStorageCapacity(state,region,need),spoilage:entry.spoilage||0,harvestBonus:localHarvestGrowth(need,kept),
   days:need>0?Math.floor(stock*60/(need*SECONDS_PER_GAME_DAY)):null,
   eta:trip?Math.max(1,Math.ceil((trip.duration-trip.elapsed)/SECONDS_PER_GAME_DAY)):null,amount:trip?.amount,risky:!!trip?.routeRisk,
   blocked:!trip&&blocked,hungry:entry.fed<.999};
@@ -2199,9 +2254,12 @@ function consumeRegionalGrain(state,owned,dt){
   const need=g.need*dt/60,used=Math.min(need,stock);
   g.fed=need?used/need:1;
   changeGranaryStock(state,region.id,-used);
+  const excess=Math.max(0,stock-used-grainStorageCapacity(state,region,g.need));
+  const spoiled=excess*(1-(1-GRAIN_SPOILAGE)**(dt/60));
+  if(spoiled>0)changeGranaryStock(state,region.id,-spoiled);
+  g.spoilage=spoiled*60/dt;
   g.flow=g.flow.filter(event=>e.seconds-event.time<GRAIN_FLOW_WINDOW);
-  const metrics=foodGrowthMetrics(g.need,stock,g.flow,e.seconds);
-  g.growth=Math.max(.01,metrics.rate)*g.fed-.12*(1-g.fed);
+  g.growth=(BASE_GROWTH+localHarvestGrowth(g.need,g.harvestRate||0))*g.fed-.12*(1-g.fed);
   if(region.owner==='you'&&g.fed<.999&&(!e.hungryRegion||g.fed<granaryFor(state,e.hungryRegion.id).fed))e.hungryRegion=region;
  }
  return !e.hungryRegion;
@@ -2263,9 +2321,45 @@ function recruitSiteCheck(state,region,owner='you',troops=RECRUIT_BATCH){
  if(residents<troops)return {ok:false,reason:'Не хватает '+(troops-residents)+' свободных жителей. В каждом городе остаётся минимум 100.'};
  return {ok:true,residents};
 }
-function recruitCheck(state,region,owner='you',purse=null,{troops=RECRUIT_BATCH,market=false}={}){
+function realmGeneralLimit(state,owner='you'){
+ return REALM_RANKS.findIndex(rank=>rank.id===realmRank(state,owner).id)+1;
+}
+function generalArmy(state,owner,slot=1,vassalId=null){
+ const matches=unit=>unit.owner===owner&&unit.generalSlot===slot&&(unit.vassalId??null)===vassalId&&unit.troops>0;
+ return state.armyMoves?.find(matches)||state.fieldArmies?.find(matches)||null;
+}
+function recruitDestination(state,owner,vassalId,requested){
+ if(vassalId!=null)return vassalById(state,vassalId,owner)?1:null;
+ const limit=realmGeneralLimit(state,owner);
+ if(requested!=null)return Number.isInteger(requested)&&requested>=1&&requested<=limit?requested:null;
+ if(owner==='you')return 1;
+ let slot=1,smallest=Infinity;
+ for(let candidate=1;candidate<=limit;candidate++){
+  const count=(generalArmy(state,owner,candidate)?.troops||0)+(state.recruitments||[]).reduce((sum,order)=>
+   sum+(order.owner===owner&&order.vassalId==null&&order.generalSlot===candidate?order.troops:0),0);
+  if(count<smallest){slot=candidate;smallest=count}
+ }
+ return slot;
+}
+function reinforceGeneral(state,owner,slot,troops,vassalId=null){
+ const house=vassalById(state,vassalId,owner);
+ if(!house&&vassalId!=null){vassalId=null;slot=1}
+ const existing=generalArmy(state,owner,slot,vassalId);
+ if(existing){existing.troops+=troops;return existing}
+ const home=councilRegion(state,house?.seatId??realmCapitalId(state,owner),owner);
+ if(!home?.slots?.[0])return null;
+ const point=home.slots[0],key=state.network?.hubKeys.get(home.id);
+ const location=state.roadNodeLocation?.(state.network,key)||{point,links:key?[key]:[]};
+ const unit={owner,vassalId:house?.id,generalSlot:slot,troops,location,kind:'field',waiting:false,arrivedAt:state.economy.seconds};
+ (state.fieldArmies??=[]).push(unit);
+ return unit;
+}
+function recruitCheck(state,region,owner='you',purse=null,{troops=RECRUIT_BATCH,market=false,generalSlot=null}={}){
  const site=recruitSiteCheck(state,region,owner,troops);
  if(!site.ok)return site;
+ if(purse?.vassalId!=null&&vassalFor(state,region)?.id!==purse.vassalId)return {ok:false,reason:'Феодал набирает войска в своих землях'};
+ const slot=recruitDestination(state,owner,purse?.vassalId??null,generalSlot);
+ if(slot===null)return {ok:false,reason:'Этот генерал недоступен'};
  const ledger=factionLedger(state,owner,purse);
  if(!ledger)return {ok:false,reason:'Неизвестная страна'};
  const settings=owner==='you'?state.economy:state.factions[owner];
@@ -2275,7 +2369,7 @@ function recruitCheck(state,region,owner='you',purse=null,{troops=RECRUIT_BATCH,
  const missing=costShortfalls(ledger.gold,ledger.stocks,cost,market||equipped?{}:{iron:RECRUIT_IRON,cloth:RECRUIT_CLOTH});
  if(missing.length)return {ok:false,reason:'Не хватает · '+missing.join(' · '),missing,cost};
  const marshalBoost=market||!!advisorIsWorking(state,'marshal',region);
- return {ok:true,equipped,marshalBoost,cost,troops,
+ return {ok:true,equipped,marshalBoost,cost,troops,generalSlot:slot,
   duration:Math.ceil(recruitmentTime(region,equipped,troops)*(marshalBoost?.75:1))};
 }
 function recruitmentTime(region,equipped=false,troops=RECRUIT_BATCH){
@@ -2301,7 +2395,7 @@ function recruitGarrison(state,region,owner='you',purse=null,options={}){
   else{ledger.stocks.iron-=RECRUIT_IRON;ledger.stocks.cloth-=RECRUIT_CLOTH}
  }
  const order={id:state.nextRecruitmentId=(state.nextRecruitmentId||0)+1,regionId:region.id,owner,vassalId:purse?.vassalId,
-  troops,elapsed:0,duration,equipped,marshalBoost,allocations,
+  generalSlot:check.generalSlot,troops,elapsed:0,duration,equipped,marshalBoost,allocations,
   purchase:options.market?marshalMarketPrice(troops):null};
  (state.recruitments??=[]).push(order);return {ok:true,order};
 }
@@ -2317,7 +2411,7 @@ function restoreRecruitPopulation(region,order){
  }
 }
 function cancelRecruitment(state,region,id,owner='you'){
- const index=(state.recruitments||[]).findIndex(q=>q.id===id&&q.regionId===region?.id&&q.owner===owner);
+ const index=(state.recruitments||[]).findIndex(q=>q.id===id&&q.regionId===region?.id&&q.owner===owner&&q.vassalId==null);
  if(index<0||region?.owner!==owner)return {ok:false,reason:'Этот отряд больше недоступен'};
  const order=state.recruitments[index];
  const ledger=factionLedger(state,owner,vassalById(state,order.vassalId,owner));
@@ -2336,40 +2430,11 @@ function cancelRecruitment(state,region,id,owner='you'){
  }
  return {ok:true};
 }
-function recruitRallyPath(state,region,destination,owner){
- if(!state.network||state.armyTerritoryAt?.(destination.point)?.owner!==owner)return null;
- const origin=state.roadNodeLocation?.(state.network,state.network.hubKeys.get(region.id));
- if(!origin||distance(origin.point,destination.point)<.1)return null;
- const path=state.armyRoadRouteBetween?.(state.network,origin,destination,owner)||
-  state.navalArmyRoute?.(owner,origin,destination);
- return path?.length>1&&armyRouteAccess(state,owner,path).ok?path:null;
-}
-function setRecruitRally(state,region,destination,owner='you'){
- if(!state.started||region?.owner!==owner)return {ok:false,reason:'Выберите своё герцогство'};
- const rallies=state.recruitRallies??=new Map();
- if(!destination){rallies.delete(region.id);return {ok:true}}
- if(!recruitRallyPath(state,region,destination,owner))return {ok:false,reason:'Выберите доступную дорогу на своей земле'};
- rallies.set(region.id,destination);
- return {ok:true};
-}
 function finishRecruitment(state,region,order){
  if(order.owner==='you'&&order.councilTask)recordCouncilResult(state,region.id,'recruits','',order.troops);
- const destination=!order.vassalId&&state.recruitRallies?.get(region.id);
- const path=destination&&recruitRallyPath(state,region,destination,order.owner);
- if(path){
-  const march={owner:order.owner,troops:order.troops,path,elapsed:0,duration:journeyDuration(path),
-   destination,landingId:path.landingId,kind:'field',waiting:false};
-  (state.armyMoves??=[]).push(march);
-  state.onArmyChanged?.({kind:'depart',march,region});
-  state.onRecruitmentFinished?.({region,order,march});
-  return;
- }
- if(destination)state.recruitRallies.delete(region.id);
- const garrisons=state.garrisons??={};
- if(garrisons[region.id]?.owner!==order.owner)garrisons[region.id]={owner:order.owner,troops:0};
- garrisons[region.id].troops+=order.troops;
- state.onGarrisonChanged?.(region,order.owner);
- state.onRecruitmentFinished?.({region,order});
+ const army=reinforceGeneral(state,order.owner,order.generalSlot??1,order.troops,order.vassalId??null);
+ if(army)state.onRecruitmentFinished?.({region,order,army});
+ else restoreRecruitPopulation(region,order);
 }
 function stepRecruitment(state,dt){
  const orders=state.recruitments||[],remaining=new Map();
@@ -2669,7 +2734,7 @@ function grantTransit(state,other,owner='you'){
  buyer.gold-=TRANSIT_COST;seller.gold+=TRANSIT_COST;agreements[key]=true;
  return {ok:true};
 }
-function marchCheck(state,from,to,count,owner='you'){if(!state.started||!state.economy)return {ok:false,reason:'Сначала выберите столицу'};if(!from||from.owner!==owner||!to||to.owner!==owner||from.id===to.id)return {ok:false,reason:'Выберите другое своё герцогство'};if(!(from.adj.includes(to.id)||to.adj.includes(from.id)))return {ok:false,reason:'Марш возможен только в соседнее герцогство'};let troops=state.garrisons?.[from.id];if(troops?.inBattle)return {ok:false,reason:'Армия уже участвует в бою'};if(!Number.isSafeInteger(count)||count<1||troops?.owner!==owner||count>troops.troops)return {ok:false,reason:'Недостаточно солдат'};let path=state.armyPath?.(from,to,owner);if(!path||path.length<2)return {ok:false,reason:'Нет сухопутной дороги'};let access=armyRouteAccess(state,owner,path);if(!access.ok)return access;return {ok:true,path}}
+function marchCheck(state,from,to,count,owner='you'){if(!state.started||!state.economy)return {ok:false,reason:'Сначала выберите столицу'};if(!from||from.owner!==owner||!to||to.owner!==owner||from.id===to.id)return {ok:false,reason:'Выберите другое своё герцогство'};if(!(from.adj.includes(to.id)||to.adj.includes(from.id)))return {ok:false,reason:'Марш возможен только в соседнее герцогство'};if(vassalFor(state,from)||vassalFor(state,to))return {ok:false,reason:'Этими войсками командует феодал'};let troops=state.garrisons?.[from.id];if(troops?.inBattle)return {ok:false,reason:'Армия уже участвует в бою'};if(!Number.isSafeInteger(count)||count<1||troops?.owner!==owner||count>troops.troops)return {ok:false,reason:'Недостаточно солдат'};let path=state.armyPath?.(from,to,owner);if(!path||path.length<2)return {ok:false,reason:'Нет сухопутной дороги'};let access=armyRouteAccess(state,owner,path);if(!access.ok)return access;return {ok:true,path}}
 function sendMarch(state,from,to,count,owner='you'){let q=marchCheck(state,from,to,count,owner);if(!q.ok)return q;state.garrisons[from.id].troops-=count;let march={owner,fromId:from.id,toId:to.id,troops:count,path:q.path,elapsed:0,duration:journeyDuration(q.path),waiting:false};(state.armyMoves??=[]).push(march);state.onArmyChanged?.({kind:'depart',march,region:from});return {ok:true,march}}
 function armyMarchElapsed(march,frameOffset){
  const partial=march.inBattle||march.gateId?0:Math.max(0,frameOffset-(march.startOffset??0));
@@ -2682,15 +2747,18 @@ function prepareArmyOrder(state,selection,destination,owner='you',targetOwner=nu
  if(selection.kind==='garrison'){
   const region=state.regions.find(r=>r.id===selection.regionId),g=state.garrisons?.[selection.regionId];
   if(!region||region.owner!==owner||g?.owner!==owner||g.troops<1)return {ok:false,reason:'Армия больше недоступна'};
+  const house=vassalFor(state,region);
+  if((house?.id??null)!==(selection.vassalId??null))return {ok:false,reason:'Этими войсками командует феодал'};
   if(g.inBattle)return {ok:false,reason:'Армия уже участвует в бою'};
   from=state.roadNodeLocation?.(state.network,state.network.hubKeys.get(region.id));
   const count=selection.count??g.troops;
   if(!Number.isSafeInteger(count)||count<1||count>g.troops)return {ok:false,reason:'Недостаточно солдат'};
-  unit={owner,troops:count};
+  unit={owner,troops:count,vassalId:house?.id};
  }else{
   unit=selection.unit;
   const moving=state.armyMoves?.includes(unit);
   if(!unit||unit.owner!==owner||!(state.fieldArmies?.includes(unit)||moving))return {ok:false,reason:'Армия больше недоступна'};
+  if((unit.vassalId??null)!==(selection.vassalId??null))return {ok:false,reason:'Этими войсками командует феодал'};
   if(unit.inBattle)return {ok:false,reason:'Армия уже участвует в бою'};
   if(unit.exitRegion)return {ok:false,reason:'Дождитесь выхода армии из чужой территории'};
   if(moving){
@@ -2727,11 +2795,11 @@ function councilArmyReport(state){
  const front=state.council?.front;
  if(!front)return null;
  const owners=new Map(state.regions.map(r=>[r.id,r.owner]));
- const muster=councilRegion(state,front.musterId),target=state.regions.find(r=>r.id===front.targetId);
+ const seat=councilRegion(state,front.musterId),muster=vassalFor(state,seat)?null:seat,target=state.regions.find(r=>r.id===front.targetId);
  const borderReserve=region=>(region.adj||[]).some(id=>owners.has(id)&&owners.get(id)!=='you')?front.reserve:0;
  const available=region=>{
   const g=state.garrisons?.[region.id];
-  if(g?.owner!=='you'||g.inBattle)return 0;
+  if(g?.owner!=='you'||g.inBattle||vassalFor(state,region))return 0;
   return Math.max(0,g.troops-borderReserve(region));
  };
  const sources=muster?state.regions.filter(r=>r.owner==='you'&&r!==muster&&available(r)>0).map(r=>({region:r,troops:available(r)})):[];
@@ -2790,7 +2858,7 @@ function stepArmies(state,dt){let moves=state.armyMoves||[];for(let i=moves.leng
  }
  if(!access.ok){let stop=Math.max(before/march.duration,access.blockedAt?.before??before/march.duration),point=pointOnRoute(march.path,stop),location=state.nearestRoadLocation?.(state.network,point.x,point.z)||{point,links:[]};location.point=point;moves.splice(i,1);march.location=location;march.elapsed=stop*march.duration;delete march.exitRegion;(state.fieldArmies??=[]).push(march);state.onArmyChanged?.({kind:'border',march,owners:access.owners});continue}march.elapsed=next;if(march.elapsed<march.duration)continue;delete march.exitRegion;
  const staging=march.councilMusterId==null?null:councilRegion(state,march.councilMusterId);
- if(staging){
+ if(staging&&!vassalFor(state,staging)){
   const g=state.garrisons[staging.id]?.owner==='you'?state.garrisons[staging.id]:{owner:'you',troops:0};
   g.troops+=march.troops;state.garrisons[staging.id]=g;
   moves.splice(i,1);
@@ -2798,7 +2866,11 @@ function stepArmies(state,dt){let moves=state.armyMoves||[];for(let i=moves.leng
   continue;
  }
  delete march.councilMusterId;
- if(march.kind==='field'){moves.splice(i,1);march.location=march.destination;march.arrivedAt=state.economy?.seconds||0;let nearbyRegion=state.regions.find(r=>r.owner===march.owner&&r.slots?.[0]&&state.garrisons?.[r.id]?.owner===march.owner&&state.garrisons[r.id].troops>0&&!state.garrisons[r.id].inBattle&&distance(r.slots[0],march.location.point)<=5),nearby=nearbyRegion?state.garrisons[nearbyRegion.id]:(state.fieldArmies||[]).find(u=>u.owner===march.owner&&!u.inBattle&&distance(u.location.point,march.location.point)<=5);if(nearby){nearby.troops+=march.troops;state.onArmyChanged?.({kind:'merge',march:nearby,selection:nearbyRegion?{kind:'garrison',regionId:nearbyRegion.id}:{kind:'unit',unit:nearby}})}else{(state.fieldArmies??=[]).push(march);state.onArmyChanged?.({kind:'field-arrive',march})}continue}let target=state.regions.find(r=>r.id===march.toId);if(!target||target.owner!==march.owner){if(!march.waiting){march.waiting=true;state.onArmyChanged?.({kind:'waiting',march,region:target})}continue}let g=state.garrisons[target.id];if(!g||g.owner!==march.owner)g=state.garrisons[target.id]={owner:march.owner,troops:0};g.troops+=march.troops;moves.splice(i,1);state.onArmyChanged?.({kind:'arrive',march,region:target})}}
+ if(march.kind==='field'){moves.splice(i,1);march.location=march.destination;march.arrivedAt=state.economy?.seconds||0;let nearbyRegion=!march.generalSlot&&state.regions.find(r=>r.owner===march.owner&&(vassalFor(state,r)?.id??null)===(march.vassalId??null)&&r.slots?.[0]&&state.garrisons?.[r.id]?.owner===march.owner&&state.garrisons[r.id].troops>0&&!state.garrisons[r.id].inBattle&&distance(r.slots[0],march.location.point)<=5),nearby=nearbyRegion?state.garrisons[nearbyRegion.id]:!march.generalSlot&&(state.fieldArmies||[]).find(u=>!u.generalSlot&&u.owner===march.owner&&(u.vassalId??null)===(march.vassalId??null)&&!u.inBattle&&distance(u.location.point,march.location.point)<=5);if(nearby){nearby.troops+=march.troops;state.onArmyChanged?.({kind:'merge',march:nearby,selection:nearbyRegion?{kind:'garrison',regionId:nearbyRegion.id}:{kind:'unit',unit:nearby}})}else{(state.fieldArmies??=[]).push(march);state.onArmyChanged?.({kind:'field-arrive',march})}continue}let target=state.regions.find(r=>r.id===march.toId);if(target?.owner===march.owner&&vassalFor(state,target)){
+ const location=state.roadNodeLocation?.(state.network,state.network.hubKeys.get(target.id))||{point:target.slots[0]};
+ moves.splice(i,1);Object.assign(march,{kind:'field',location,arrivedAt:state.economy?.seconds||0});
+ (state.fieldArmies??=[]).push(march);state.onArmyChanged?.({kind:'field-arrive',march});continue;
+ }if(!target||target.owner!==march.owner){if(!march.waiting){march.waiting=true;state.onArmyChanged?.({kind:'waiting',march,region:target})}continue}let g=state.garrisons[target.id];if(!g||g.owner!==march.owner)g=state.garrisons[target.id]={owner:march.owner,troops:0};g.troops+=march.troops;moves.splice(i,1);state.onArmyChanged?.({kind:'arrive',march,region:target})}}
 // Wars are explicit: trading partners do not fight until war is declared.
 function warKey(a,b){return [a,b].sort().join('|')}
 function isAtWar(state,a,b){
@@ -2975,8 +3047,13 @@ function payWarReparations(state,dt){
  for(const [owner,paid] of credits)factionLedger(state,owner).gold+=paid;
  return payroll;
 }
+function armySelectionVassal(state,selection){
+ if(selection?.kind==='garrison')return vassalFor(state,state.regions.find(region=>region.id===selection.regionId));
+ const unit=selection?.unit;
+ return unit?vassalById(state,unit.vassalId,unit.owner):null;
+}
 function armyForSelection(state,selection){if(!selection)return null;if(selection.kind==='garrison'){let r=state.regions.find(r=>r.id===selection.regionId),unit=state.garrisons?.[selection.regionId];return r&&unit&&r.owner===unit.owner&&unit.troops>0?{unit,location:state.roadNodeLocation?.(state.network,state.network.hubKeys.get(r.id))}:null}let unit=selection.unit;if(!unit||unit.troops<=0||!state.fieldArmies?.includes(unit))return null;return {unit,location:unit.location}}
-function mergeArmies(state,from,target,owner='you'){let a=armyForSelection(state,from),b=armyForSelection(state,target);if(!a||!b||a.unit===b.unit||a.unit.owner!==owner||b.unit.owner!==owner)return {ok:false,reason:'Выберите две свои остановившиеся армии'};if(a.unit.inBattle||b.unit.inBattle)return {ok:false,reason:'Нельзя объединять войска во время боя'};if(distance(a.location.point,b.location.point)>5)return {ok:false,reason:'Сначала подведите армии друг к другу'};let access=armyRouteAccess(state,owner,[a.location.point,b.location.point]);if(!access.ok)return access;b.unit.troops+=a.unit.troops;a.unit.troops=0;if(from.kind==='unit')state.fieldArmies.splice(state.fieldArmies.indexOf(a.unit),1);state.onArmyChanged?.({kind:'merge',march:b.unit});return {ok:true,unit:b.unit}}
+function mergeArmies(state,from,target,owner='you'){let a=armyForSelection(state,from),b=armyForSelection(state,target);if(!a||!b||a.unit===b.unit||a.unit.generalSlot||b.unit.generalSlot||a.unit.owner!==owner||b.unit.owner!==owner||armySelectionVassal(state,from)||armySelectionVassal(state,target))return {ok:false,reason:'Выберите две свои остановившиеся армии'};if(a.unit.inBattle||b.unit.inBattle)return {ok:false,reason:'Нельзя объединять войска во время боя'};if(distance(a.location.point,b.location.point)>5)return {ok:false,reason:'Сначала подведите армии друг к другу'};let access=armyRouteAccess(state,owner,[a.location.point,b.location.point]);if(!access.ok)return access;b.unit.troops+=a.unit.troops;a.unit.troops=0;if(from.kind==='unit')state.fieldArmies.splice(state.fieldArmies.indexOf(a.unit),1);state.onArmyChanged?.({kind:'merge',march:b.unit});return {ok:true,unit:b.unit}}
 function battleCombatants(state){let result=[];for(const r of state.regions){let g=state.garrisons?.[r.id];if(g&&g.owner===r.owner&&g.troops>0&&r.slots?.[0])result.push({unit:g,point:r.slots[0],garrison:true})}for(const u of state.fieldArmies||[])if(u.troops>0)result.push({unit:u,point:u.location.point,garrison:false});for(const u of state.armyMoves||[])if(u.troops>0){
  let ratio=Math.min(1,u.elapsed/u.duration),along=routeDistanceAt(u.path,ratio);
  if(u.path.landingId!=null&&along>=u.path.seaStart&&along<=u.path.seaEnd)continue;
@@ -2992,10 +3069,10 @@ function stepAutoGarrison(state){
  const now=state.economy?.seconds||0;
  for(let i=state.fieldArmies.length-1;i>=0;i--){
   const unit=state.fieldArmies[i];
-  if(unit.inBattle||unit.rebellion||unit.exitRegion)continue;
+  if(unit.generalSlot||unit.inBattle||unit.rebellion||unit.exitRegion)continue;
   if(now-(unit.arrivedAt??0)<AUTO_GARRISON_DELAY)continue;
   const region=state.armyTerritoryAt?.(unit.location?.point)||state.regions.find(r=>r.owner===unit.owner&&r.slots?.[0]&&distance(unit.location?.point||{x:-1e9,z:-1e9},r.slots[0])<=AUTO_GARRISON_RADIUS);
-  if(!region||region.owner!==unit.owner)continue;
+  if(!region||region.owner!==unit.owner||(vassalFor(state,region)?.id??null)!==(unit.vassalId??null))continue;
   const seat=duchySeat(region);
   if(!seat||distance(unit.location.point,region.slots[0])>AUTO_GARRISON_RADIUS)continue;
   let g=state.garrisons?.[region.id];
@@ -3033,7 +3110,6 @@ function captureDuchy(state,region,attacker,{rebellion=false}={}){
  region.owner=attacker;
  delete region.armory;delete region.market;delete region.councilReliefUntil;delete region.sabotageUntil;delete region.sabotageControl;
  state.council?.stewards.delete(region.id);
- state.recruitRallies?.delete(region.id);
  state.sieges?.delete(region.id);
  if(state.garrisons)delete state.garrisons[region.id];
  if(rebellion){
@@ -3081,6 +3157,8 @@ function captureDuchy(state,region,attacker,{rebellion=false}={}){
  }
  if(rebellion)duchySeat(region).capital=true;
  if(defender==='you'&&state.council?.front.musterId===region.id)state.council.front.musterId=state.capitalId;
+ if(defender==='you'&&state.domainPriority)state.domainPriority=state.domainPriority.filter(id=>id!==region.id);
+ stepControl(state,0);
  refreshFortifications(state);
  if(oldFaction?.isRebel&&defeated)resolveRebellions(state);
  if(rebellion)state.onRebellion?.({kind:'start',region,owner:defender,rebel:attacker});
@@ -3108,6 +3186,7 @@ function occupyNeutralDuchy(state,region,owner='you'){
  region.owner=owner;refreshFortifications(state);
  region.buildings.push({type:'city',x:q.x,z:q.z,slotId:q.id,scale:q.scale,terrain:q.terrain,population:NEUTRAL_RESIDENTS,capital:false});
  beginOccupation(state,region);
+ stepControl(state,0);
  recallSettlers(state,region);
  state.evacuateSettledDuchy?.(region);
  state.onDuchyCaptured?.({region,attacker:owner,defender:'neutral',wasCapital:false});
@@ -3247,6 +3326,7 @@ function grantVassalDuchy(state,region,vassalId=null,owner='you'){
  }
  region.vassalId=vassal.id;
  vassal.lands.push(region.id);
+ stepControl(state,0);
  state.onVassalGranted?.(region);
  return {ok:true,vassal};
 }
@@ -3279,7 +3359,13 @@ function releaseVassalDuchy(state,region,restoreDirect=false){
    factionLedger(state,vassal.owner).gold+=vassal.gold;
    creditRealmCargo(state,vassal.owner,vassal.stocks);
   }
+  let troops=0;
+  for(const list of [state.fieldArmies||[],state.armyMoves||[]])for(let i=list.length-1;i>=0;i--){
+   if(list[i].vassalId!==vassal.id)continue;
+   troops+=list[i].troops;list.splice(i,1);
+  }
   state.vassals.delete(vassal.id);
+  if(troops>0)reinforceGeneral(state,vassal.owner,1,troops);
  }
 }
 function vassalFoodPlan(state,region){
@@ -3318,8 +3404,8 @@ function vassalDefense(state,region,task,enemies,guards){
  const owner=region.owner,front=(region.adj||[]).some(id=>enemies.has(state.regions.find(r=>r.id===id)?.owner));
  const revolt=unrestReport(state,region,guards)?.risk;
  if(front||revolt){
-  const target=front?100:40,held=guards.get(region.id)||0;
-  if(held<target&&!recruitQueue(state,region).length){
+  const target=front?100:40,held=Math.max(guards.get(region.id)||0,generalArmy(state,owner,1,task.vassalId)?.troops||0);
+  if(held<target&&!state.recruitments.some(order=>order.vassalId===task.vassalId)){
    let result=recruitGarrison(state,region,owner,task);
    if(!result.ok){
     const residents=recruitSiteCheck(state,region,owner,MARSHAL_RECRUIT_STEP).residents||0;
@@ -3348,39 +3434,83 @@ function vassalDefense(state,region,task,enemies,guards){
  orderWarship(state,result.ship,berth,owner);
  return 'Военный корабль';
 }
-// Vassal houses raise field armies and fight the realm's wars without holding back.
-function vassalWarSupport(state,vassal,owner,lands,enemies){
- if(!enemies.size||!state.network||!state.roadNodeLocation)return;
- const enemyRegions=state.regions.filter(r=>enemies.has(r.owner));
- if(!enemyRegions.length)return;
- for(const land of lands){
-  const g=state.garrisons?.[land.id];
-  if(!g||g.owner!==owner||g.troops<80||g.inBattle)continue;
-  if((state.armyMoves||[]).some(m=>m.owner===owner&&m.councilMusterId===land.id))continue;
-  const near=enemyRegions.filter(r=>r.adj.includes(land.id)||land.adj.includes(r.id));
-  const pool=near.length?near:enemyRegions;
-  let best=null,bestD=Infinity;
-  for(const r of pool){const d=Math.hypot(r.slots[0].x-land.slots[0].x,r.slots[0].z-land.slots[0].z);if(d<bestD){bestD=d;best=r}}
-  if(!best)continue;
-  const dest=state.roadNodeLocation(state.network,state.network.hubKeys.get(best.id));
-  if(!dest)continue;
-  const count=Math.min(g.troops-40,140);
-  if(count<30)continue;
-  const plan=prepareArmyOrder(state,{kind:'garrison',regionId:land.id,count},dest,owner,best.owner);
-  if(plan.ok){
-   orderArmy(state,{kind:'garrison',regionId:land.id,count},dest,owner,best.owner);
-   vassal.status='В походе: '+best.city;
+function vassalWarSupport(state,vassal,owner,lands,enemies,combatants){
+ if(!lands.length||!state.network||!state.roadNodeLocation)return;
+ const now=state.economy.seconds;
+ const unit=generalArmy(state,owner,1,vassal.id);
+ if(!unit){vassal.militaryStatus='';return}
+ const moving=state.armyMoves.includes(unit);
+ if(unit?.inBattle)return;
+ const hostile=combatants.filter(entry=>enemies.has(entry.unit.owner));
+ const enemyStrength=(point,radius,fieldOnly=false)=>hostile.reduce((sum,entry)=>
+  sum+((!fieldOnly||!entry.garrison)&&distance(point,entry.point)<=radius?entry.unit.troops:0),0);
+ const seat=lands.find(land=>land.id===vassal.seatId)||lands[0];
+ const location=land=>state.roadNodeLocation(state.network,state.network.hubKeys.get(land.id));
+ const point=unit?(moving?pointOnRoute(unit.path,unit.elapsed/unit.duration):unit.location.point):seat.slots[0];
+ const home=lands.slice().sort((a,b)=>enemyStrength(a.slots[0],20,true)-enemyStrength(b.slots[0],20,true)||
+  distance(point,a.slots[0])-distance(point,b.slots[0]))[0];
+ const localDanger=unit&&enemyStrength(point,28,true)>unit.troops*.9;
+ const plannedDanger=moving&&enemyStrength(unit.destination.point,24,true)>unit.troops*.9;
+ const selection={kind:'unit',unit,vassalId:vassal.id};
+ const issue=(destination,kind,region,targetOwner=null)=>{
+  if(!destination||unit&&distance(point,destination.point)<3)return false;
+  const plan=prepareArmyOrder(state,selection,destination,owner,targetOwner);
+  if(!plan.ok)return false;
+  if(kind!=='Отход'){
+   const cover=kind==='Прикрытие'?(state.garrisons?.[region.id]?.troops||0):0;
+   const unsafe=Array.from({length:7},(_,index)=>pointOnRoute(plan.path,index/6)).some(position=>
+    enemyStrength(position,20,true)>(plan.unit.troops+(distance(position,destination.point)<15?cover:0))*.9);
+   if(unsafe)return false;
   }
-  // Commit the house retinue to the realm's war as well.
-  const commit=Math.min(vassal.muster||0,140);
-  if(commit>=30){
-   const loc=state.roadNodeLocation(state.network,state.network.hubKeys.get(land.id));
-   const unit={owner,troops:commit,location:loc||{point:{x:land.slots[0].x,z:land.slots[0].z}},kind:'field',waiting:false,inBattle:false};
-   (state.fieldArmies??=[]).push(unit);
-   const retinue=prepareArmyOrder(state,{kind:'unit',unit},dest,owner,best.owner);
-   if(retinue.ok){orderArmy(state,{kind:'unit',unit},dest,owner,best.owner);vassal.muster-=commit}
-   else state.fieldArmies.splice(state.fieldArmies.indexOf(unit),1);
+  const result=orderArmy(state,selection,destination,owner,targetOwner);
+  if(!result.ok)return false;
+  result.march.vassalOrder=kind;
+  result.march.vassalOrderAt=now;
+  vassal.militaryStatus=kind+(region?' · '+region.city:'');
+  return true;
+ };
+ if(unit&&(!enemies.size||localDanger||plannedDanger||unit.waiting||unit.troops<30)){
+  if(moving&&unit.vassalOrder==='Отход'&&!plannedDanger)return;
+  issue(location(home),'Отход',home);
+  return;
+ }
+ if(!enemies.size){vassal.militaryStatus='';return}
+ const threatened=land=>state.sieges?.get(land.id)?.defender===owner||enemyStrength(land.slots[0],33,true)>0;
+ const coverLand=(land,troops)=>enemyStrength(land.slots[0],27,true)<(troops+(state.garrisons?.[land.id]?.troops||0))*.8&&
+  issue(location(land),'Прикрытие',land);
+ if(moving){
+  if(['Осада','Рейд на обоз'].includes(unit.vassalOrder))lands.some(land=>threatened(land)&&coverLand(land,unit.troops));
+  return;
+ }
+ const activeSiege=unit&&[...(state.sieges?.values()||[])].find(siege=>siege.attacker===owner&&
+  distance(point,state.regions.find(land=>land.id===siege.regionId)?.slots?.[0]||seat.slots[0])<SIEGE_RADIUS);
+ if(activeSiege&&enemyStrength(point,50,true)<unit.troops*.65)return;
+ const troops=unit.troops;
+ const borders=state.regions.filter(land=>land.owner===owner&&distance(point,land.slots[0])<100&&
+  threatened(land));
+ borders.sort((a,b)=>Number(vassalFor(state,b)===vassal)-Number(vassalFor(state,a)===vassal)||distance(point,a.slots[0])-distance(point,b.slots[0]));
+ let acted=borders.some(land=>coverLand(land,troops));
+ if(!acted&&!borders.some(land=>vassalFor(state,land)===vassal)){
+  const raid=(state.economy?.shipments||[]).filter(ship=>enemies.has(shipmentOwner(ship))&&ship.path?.length>1&&
+   !ship.supplyBlocked&&ship.kind!=='loot'&&ship.duration-ship.elapsed>=5).map(ship=>{
+   const eta=Math.min(ship.duration,ship.elapsed+18);
+   const along=routeDistanceAt(ship.path,eta/ship.duration);
+   return ship.mode==='sea'&&along>=ship.seaStart&&along<=ship.seaEnd?null:pointOnRoute(ship.path,eta/ship.duration);
+  }).filter(point=>point).filter(target=>distance(point,target)<65&&enemyStrength(target,30)<troops*.55)
+   .sort((a,b)=>distance(point,a)-distance(point,b));
+  const raidLocation=raid[0]&&state.nearestRoadLocation?.(state.network,raid[0].x,raid[0].z);
+  acted=!!(raidLocation&&issue(raidLocation,'Рейд на обоз'));
+  if(!acted){
+   const targets=state.regions.filter(land=>enemies.has(land.owner)&&duchySeat(land)&&distance(point,land.slots[0])<130&&
+    enemyStrength(land.slots[0],42,true)<troops*.45&&enemyStrength(land.slots[0],18)<troops*.75);
+   targets.sort((a,b)=>distance(point,a.slots[0])-distance(point,b.slots[0]));
+   acted=targets.slice(0,4).some(land=>issue(location(land),'Осада',land,land.owner));
   }
+ }
+ if(!acted&&now-(unit.vassalOrderAt||0)>30&&
+  !state.regions.some(land=>enemies.has(land.owner)&&distance(point,land.slots[0])<SIEGE_RADIUS)&&
+  !borders.some(land=>distance(point,land.slots[0])<SIEGE_RADIUS)){
+  issue(location(home),'Отход',home);
  }
 }
 // Vassal houses settle unoccupied lands on their own, paying from their treasury.
@@ -3404,7 +3534,8 @@ function vassalExpand(state,vassal,owner,lands){
 }
 // Rival houses occasionally fight over each other's lands while the realm is at peace.
 function vassalFeud(state,vassal,owner,lands){
- if(!vassal.muster||vassal.muster<100)return;
+ const army=generalArmy(state,owner,1,vassal.id);
+ if(!army||army.inBattle||army.troops<100)return;
  const now=state.economy.seconds;
  if((vassal.feudCooldownUntil||0)>now)return;
  if(activeWarEnemies(state,owner).length)return;
@@ -3414,8 +3545,9 @@ function vassalFeud(state,vassal,owner,lands){
    const rb=state.regions.find(r=>r.id===b);
    return rb&&(a.adj.includes(rb.id)||rb.adj.includes(a.id));
   }));
-  if(!adjacent||vassal.muster<=(rival.muster||0)*1.6)continue;
-  const chance=vassal.muster/(vassal.muster+(rival.muster||0));
+  const opposition=generalArmy(state,owner,1,rival.id);
+  if(!adjacent||opposition?.inBattle||army.troops<=(opposition?.troops||0)*1.6)continue;
+  const chance=army.troops/(army.troops+(opposition?.troops||0));
   if((state.revoltRandom||Math.random)()>chance){vassal.feudCooldownUntil=now+240;continue}
   const prizes=rival.lands.filter(id=>id!==rival.seatId).map(id=>state.regions.find(r=>r.id===id)).filter(Boolean);
   if(!prizes.length){vassal.feudCooldownUntil=now+240;continue}
@@ -3423,8 +3555,8 @@ function vassalFeud(state,vassal,owner,lands){
   rival.lands=rival.lands.filter(id=>id!==prize.id);
   vassal.lands.push(prize.id);
   prize.vassalId=vassal.id;
-  vassal.muster=Math.round(vassal.muster*.55);
-  rival.muster=Math.round((rival.muster||0)*.35);
+  army.troops=Math.round(army.troops*.55);
+  if(opposition)opposition.troops=Math.round(opposition.troops*.35);
   vassal.feudCooldownUntil=now+300;
   rival.feudCooldownUntil=now+300;
   if(owner==='you')pushNotification(state,{kind:'danger',title:'Распря вассалов',body:vassalDisplayName(state,vassal)+' захватил '+prize.name+' у дома '+vassalDisplayName(state,rival)+'.',regionId:prize.id});
@@ -3434,27 +3566,32 @@ function vassalFeud(state,vassal,owner,lands){
 function stepVassals(state){
  if(!state.vassals?.size)return;
  const now=state.economy.seconds,guards=defendingTroopsByRegion(state);
- for(const vassal of state.vassals.values()){  if(now<vassal.nextReview)continue;
-  vassal.nextReview=now+VASSAL_REVIEW_SECONDS;
-  const {owner}=vassal,council=getRealmCouncil(state,owner);
+ let combatants;
+ for(const vassal of state.vassals.values()){
+  const {owner}=vassal;
   const lands=vassal.lands.map(id=>councilRegion(state,id,owner)).filter(r=>r&&vassalFor(state,r)===vassal);
+  const enemies=new Set(activeWarEnemies(state,owner));
+  if(now>=(vassal.nextMilitaryReview||0)){
+   vassal.nextMilitaryReview=now+6;
+   vassalWarSupport(state,vassal,owner,lands,enemies,enemies.size?(combatants??=battleCombatants(state)):[]);
+  }
+  if(now<vassal.nextReview)continue;
+  const council=getRealmCouncil(state,owner);
+  vassal.nextReview=now+VASSAL_REVIEW_SECONDS;
   state.dispatchVassalTrade?.(vassal,lands);
   if(!vassal.tier)vassal.tier='fief';
   const promotion=vassalPromotionCheck(state,vassal,owner);
   if(promotion.ok){promoteVassal(state,vassal,owner);continue}
-  const enemies=new Set(activeWarEnemies(state,owner));
-  vassalWarSupport(state,vassal,owner,lands,enemies);
-  // Keep a standing retinue, raised from the vassal treasury.
-  const frontier=lands.some(r=>(r.adj||[]).some(id=>{const o=state.regions.find(q=>q.id===id)?.owner;return o!==undefined&&o!==owner&&o!=='neutral'}));
-  const musterTarget=(frontier||enemies.size?110:60)+(lands.length-1)*40;
-  if((vassal.muster||0)<musterTarget&&vassal.gold>=RECRUIT_GOLD+(enemies.size?40:140)&&
-   !costShortfalls(vassal.gold,vassal.stocks,RECRUIT_GOLD,{iron:RECRUIT_IRON,cloth:RECRUIT_CLOTH}).length){
-   vassal.gold-=RECRUIT_GOLD;vassal.stocks.iron-=RECRUIT_IRON;vassal.stocks.cloth-=RECRUIT_CLOTH;
-   vassal.muster=(vassal.muster||0)+RECRUIT_BATCH;
+  const task={id:'vassal:'+vassal.id,vassalId:vassal.id,realm:owner,gold:vassal.gold,stocks:vassal.stocks,actions:0};
+  const troops=generalArmy(state,owner,1,vassal.id)?.troops||0;
+  const pending=state.recruitments.some(order=>order.vassalId===vassal.id);
+  if(!pending&&troops<(enemies.size?170:80)+(lands.length-1)*40&&vassal.gold>=RECRUIT_GOLD+(enemies.size?40:100)){
+   const source=lands.find(land=>recruitCheck(state,land,owner,task).ok);
+   if(source&&recruitGarrison(state,source,owner,task).ok)vassal.gold=task.gold;
   }
   vassalFeud(state,vassal,owner,lands);
   vassalExpand(state,vassal,owner,lands);
-  const task={id:'vassal:'+vassal.id,vassalId:vassal.id,realm:owner,gold:vassal.gold,stocks:vassal.stocks,actions:0};
+  task.gold=vassal.gold;
   const building=lands.find(r=>council.projects.some(p=>p.regionId===r.id&&p.vassalId===vassal.id));
   if(building){vassal.status='Строительство · '+building.city;continue}
   const available=lands.filter(r=>!moodReport(state,r).besieged);
@@ -3606,6 +3743,7 @@ function arrivePetition(state,ship,advance=0,turnTimes=null){
   const vassal=vassalById(state,ship.vassalId,ship.owner);
   if(vassal){vassal.gold+=ship.reward;vassal.lands.push(target.id);target.vassalId=ship.vassalId}
  }else ledger.gold+=ship.reward;
+ stepControl(state,0);
  recallSettlers(state,target,ship,advance,turnTimes);
  const timedX=(name,fn)=>{const s0=Date.now();const result=fn();const d=Date.now()-s0;const w=state._phaseTimings?.worst;if(w&&d>(w[name]||0))w[name]=d;return result};
  timedX('evacuate',()=>state.evacuateSettledDuchy?.(target));
@@ -3629,7 +3767,7 @@ function recordRoadTraffic(state,ship,oldElapsed,newElapsed){if(!ship.path||ship
  for(;i<path.length&&cum[i-1]<end;i++){let a=path[i-1],b=path[i],len=cum[i]-cum[i-1],overlap=Math.max(0,Math.min(end,cum[i])-Math.max(start,cum[i-1]));if(overlap>0&&len>0&&!(ship.mode==='sea'&&cum[i]>ship.seaStart+1e-8&&cum[i-1]<ship.seaEnd-1e-8)){let key=roadEdgeKey(a,b),old=traffic.get(key),value=roadTrafficValue(old,e.seconds)+overlap/len;traffic.set(key,{value,time:e.seconds});e.trafficDirty=true}ship._trafficCursor=i+1}
  ship._trafficAt=end}
 // An army intercepts an enemy caravan on the portion traversed this tick.
-function findShipmentRaid(state,ship,fromElapsed,toElapsed){if(ship.kind==='tradeReturn'||!state.raidPath||!ship.path?.length||!state.wars||!Object.keys(state.wars).length||state.economy.seconds<(ship.raidImmuneUntil||0))return null;let victim=shipmentOwner(ship),candidates=(state._raidTick===state.economy.seconds?state._raidCandidates:battleCombatants(state)).filter(a=>!a.unit.inBattle&&isAtWar(state,a.unit.owner,victim));if(!candidates.length)return null;let span=Math.max(0,Math.min(toElapsed,ship.duration)-fromElapsed),samples=Math.max(1,Math.ceil(span*(ship.path.seaStart==null?CART_SPEED:SHIP_SPEED)/2));for(let j=0;j<=samples;j++){let fraction=j/samples,elapsed=fromElapsed+span*fraction,p=pointOnRoute(ship.path,Math.min(1,elapsed/ship.duration));const along=routeDistanceAt(ship.path,elapsed/ship.duration);if(ship.mode==='sea'&&along>=ship.seaStart&&along<=ship.seaEnd)continue;for(const a of candidates){let unit=a.unit,position=a.point;if(unit._raidStamp===state.economy.seconds&&unit.path?.length&&unit._raidBefore!=null){let t=unit._raidBefore+(unit.elapsed-unit._raidBefore)*fraction;position=pointOnRoute(unit.path,Math.min(1,t/unit.duration))}if(distance(p,position)>3.5)continue;let path=state.raidPath(unit.owner,p);if(path?.length>=2)return {attacker:unit.owner,victim,point:p,path,elapsed,sourceRegionId:regionAt(state.regions,position.x,position.z)?.id}}}return null}
+function findShipmentRaid(state,ship,fromElapsed,toElapsed){if(ship.kind==='tradeReturn'||!state.raidPath||!ship.path?.length||!state.wars||!Object.keys(state.wars).length||state.economy.seconds<(ship.raidImmuneUntil||0))return null;let victim=shipmentOwner(ship),candidates=(state._raidTick===state.economy.seconds?state._raidCandidates:battleCombatants(state)).filter(a=>!a.unit.inBattle&&isAtWar(state,a.unit.owner,victim));if(!candidates.length)return null;let span=Math.max(0,Math.min(toElapsed,ship.duration)-fromElapsed),samples=Math.max(1,Math.ceil(span*(ship.path.seaStart==null?CART_SPEED:SHIP_SPEED)/2));for(let j=0;j<=samples;j++){let fraction=j/samples,elapsed=fromElapsed+span*fraction,p=pointOnRoute(ship.path,Math.min(1,elapsed/ship.duration));const along=routeDistanceAt(ship.path,elapsed/ship.duration);if(ship.mode==='sea'&&along>=ship.seaStart&&along<=ship.seaEnd)continue;for(const a of candidates){let unit=a.unit,position=a.point;if(unit._raidStamp===state.economy.seconds&&unit.path?.length&&unit._raidBefore!=null){let t=unit._raidBefore+(unit.elapsed-unit._raidBefore)*fraction;position=pointOnRoute(unit.path,Math.min(1,t/unit.duration))}if(distance(p,position)>3.5)continue;const land=regionAt(state.regions,position.x,position.z),house=(a.garrison?vassalFor(state,land):vassalById(state,unit.vassalId,unit.owner));let path=state.raidPath(unit.owner,p,house?.seatId);if(path?.length>=2)return {attacker:unit.owner,victim,point:p,path,elapsed,vassalId:house?.id,sourceRegionId:land?.id}}}return null}
 function refundInterceptedTrade(state,ship){
  if(ship.kind==='export'&&!ship.marketTrade){
   const buyer=factionLedger(state,ship.buyer);
@@ -3642,7 +3780,7 @@ function refundInterceptedTrade(state,ship){
 }
 function redirectRaidedShipment(state,ship,raid){const e=state.economy;
  recordWarLoss(state,raid.victim,raid.attacker,'cargoLost',ship.amount||0);
- refundInterceptedTrade(state,ship);Object.assign(ship,{kind:'loot',mode:'land',seaSupply:null,seaStart:null,seaEnd:null,owner:raid.attacker,stolenFrom:raid.victim,lootRegionId:raid.sourceRegionId,path:raid.path,elapsed:0,duration:journeyDuration(raid.path),raidImmuneUntil:e.seconds+2,originRegionId:null,targetId:null,value:0,supplyBlocked:false,routeRisk:false,warDetour:false});state.onShipmentRaided?.({ship,attacker:raid.attacker,victim:raid.victim,point:raid.point});return ship}
+ refundInterceptedTrade(state,ship);Object.assign(ship,{kind:'loot',mode:'land',seaSupply:null,seaStart:null,seaEnd:null,owner:raid.attacker,vassalId:raid.vassalId,stolenFrom:raid.victim,lootRegionId:raid.sourceRegionId,path:raid.path,elapsed:0,duration:journeyDuration(raid.path),raidImmuneUntil:e.seconds+2,originRegionId:null,targetId:null,value:0,supplyBlocked:false,routeRisk:false,warDetour:false});state.onShipmentRaided?.({ship,attacker:raid.attacker,victim:raid.victim,point:raid.point});return ship}
 const WARSHIP_COST={gold:90,wood:20,iron:8};
 const WARSHIP_SPEED=30;
 const PATROL_RADIUS=42;
@@ -4087,7 +4225,12 @@ function stepEconomy(state,dt){if(!state.started||state.defeated||(state.campaig
   }
   depositMarketCargo(state,ship.supplyMarketId,ship.cargo||{[ship.good]:ship.amount},ship.owner);
  }else if(ship.kind==='loot'){
-  ship.realmReceipts=creditRealmCargo(state,ship.owner,ship.cargo||{[ship.good]:ship.amount},councilRegion(state,ship.lootRegionId,ship.owner));
+  const house=vassalById(state,ship.vassalId,ship.owner),cargo=ship.cargo||{[ship.good]:ship.amount};
+  if(house){
+   const recipient=councilRegion(state,house.seatId,ship.owner);
+   for(const [good,amount] of Object.entries(cargo))creditVassalGoods(state,recipient,house,good,amount);
+   ship.realmReceipts=cargo;
+  }else ship.realmReceipts=creditRealmCargo(state,ship.owner,cargo,councilRegion(state,ship.lootRegionId,ship.owner));
  }else if(ship.kind==='botSupply'){let owner=state.factions?.[ship.owner];if(owner&&!owner.defeated)for(const [good,amount] of Object.entries(ship.cargo||{[ship.good]:ship.amount}))owner.stocks[good]=(owner.stocks[good]||0)+amount}else{for(const [good,amount] of Object.entries(ship.cargo||{[ship.good]:ship.amount}))e.stocks[good]=(e.stocks[good]||0)+amount;if(ship.kind==='supply'&&ship.owner==='you'&&ship.originRegion!=null){e.regionDeliveries??={};let totals=e.regionDeliveries[ship.originRegion]??={};for(const [good,amount] of Object.entries(ship.cargo||{[ship.good]:ship.amount}))totals[good]=(totals[good]||0)+amount;}if(ship.cargo?.grain)recordGrainFlow(state,ship.cargo.grain);else if(!ship.cargo&&ship.good==='grain')recordGrainFlow(state,ship.amount);if(ship.kind==='import'){let seller=state.factions?.[ship.seller];if(seller)seller.gold+=ship.value}}recordDeliveryFeedback(state,ship);if(ship.kind==='export'&&ship.fleetClass){returnMerchantHome(state,ship);continue}e.shipments.splice(i,1)}
  const t2=Date.now();mark('shipments',t1,t2);
  const seaInTransit = new Set(e.shipments.filter(ship=>ship.seaSupply && (ship.kind==='supply'||ship.kind==='botSupply'))
@@ -4247,4 +4390,4 @@ function stepEconomy(state,dt){if(!state.started||state.defeated||(state.campaig
  updateCampaign(state,dt);
  const t8=Date.now();mark('tail',t7,t8);P.count++;
 }
-if(typeof module!=='undefined')module.exports={warDeclarationCheck,peaceOptions,settleWar,truceDays,reparationRates,TYPES,LAND_NAMES,terrainAt,terrainHeight,productivity,inRing,isSeaBackground,triangulatePolygon,initRegion,regionAt,generateSlots,slotCapacity,slotRadius,slotAt,boundaryDistance,ringArea,buildCheck,build,demolishBuilding,localGrainShare,granaryStock,granaryReport,upgradeCheck,upgradeBuilding,initializeEconomy,gameDate,SECONDS_PER_GAME_DAY,pushNotification,markNotification,segmentWithin,routeWithin,routeLength,journeyDuration,routeDistanceAt,markSeaLeg,CART_SPEED,SHIP_SPEED,MIN_TRADE_CARGO,pointOnRoute,routeHeading,shipmentOwner,commissionWarship,orderWarship,orderEscort,orderRepair,stepWarships,navalPosition,WARSHIP_COST,PATROL_RADIUS,tradeRange,tradePremium,tradeFleet,tradeFleetAvailable,returnMerchantHome,tradePartnerAlive,returnTradeShipment,productionTotals,populationTotal,workforceReport,productionRate,buildingJobs,beginOccupation,settlementReport,seatRepairCheck,repairSeat,consumeRegionalGrain,stepSettlement,relocateResidents,taxIncome,regionEconomy,logisticsReport,vassalFor,vassalGrantCheck,grantVassalDuchy,vassalGiftCheck,giftVassalGold,cityHousing,housingTotal,stepEconomy,controlEfficiency,controlReport,stepControl,REALM_RANKS,realmRanks,realmRank,realmPromotionCheck,promoteRealm,duchyStability,moodEfficiency,economicEfficiency,moodReport,reliefCheck,sendRelief,stepMood,RELIEF_GOLD,RELIEF_GRAIN,unrestReport,startRebellion,stepUnrest,resolveRebellions,UNREST_SECONDS,REVOLT_COOLDOWN,TAX_PER_1000,recordGrainFlow,grainGrowthMetrics,grainReserve,tradeReserve,recruitCheck,recruitGarrison,recruitmentTime,recruitQueue,cancelRecruitment,setRecruitRally,RECRUIT_QUEUE_LIMIT,stepRecruitment,garrisonUpkeep,garrisonGrainNeed,armyTroops,hasArmyAccess,segmentRegionEntry,armyRouteAccess,armyEdgeFilter,supplyEdgeFilter,remainingSupplyPath,grantTransit,TRANSIT_COST,marchCheck,sendMarch,stepArmies,orderArmy,prepareArmyOrder,orderArmyGroup,warKey,isAtWar,declareWar,mergeArmies,battleCombatants,stepBattles,RECRUIT_BATCH,RECRUIT_IRON,RECRUIT_CLOTH,RECRUIT_GOLD,SIEGE_RADIUS,SIEGE_BASE_SECONDS,captureDuchy,stepSieges,findShipmentRaid,redirectRaidedShipment,roadEdgeKey,roadTrafficValue,recordRoadTraffic,petitionFor,petitionCheck,sendPetition,arrivePetition,adjacentToFaction,initializeCampaign,initializeCampaignRecap,updateCampaign,campaignNationAlive,createRealmCouncil,getRealmCouncil,realmCapitalId,factionLedger,pacifyCheck,pacify,PACIFY_GOLD,PACIFY_GRAIN,PACIFY_SECONDS,PACIFY_COOLDOWN,storeCheck,buildStore,setSupplyPriority,STORE_COST,STORE_SHARE,SUPPLY_PRIORITY_SHARE,VASSAL_TIERS,vassalTierInfo,vassalPromotionCheck,promoteVassal,activeWarEnemies,vassalSeatName,vassalSurname,vassalDisplayName};
+if(typeof module!=='undefined')module.exports={warDeclarationCheck,peaceOptions,settleWar,truceDays,reparationRates,TYPES,LAND_NAMES,terrainAt,terrainHeight,productivity,inRing,isSeaBackground,triangulatePolygon,initRegion,regionAt,generateSlots,slotCapacity,slotRadius,slotAt,boundaryDistance,ringArea,buildCheck,build,demolishBuilding,localGrainShare,granaryStock,granaryReport,upgradeCheck,upgradeBuilding,initializeEconomy,gameDate,SECONDS_PER_GAME_DAY,pushNotification,markNotification,segmentWithin,routeWithin,routeLength,journeyDuration,routeDistanceAt,markSeaLeg,CART_SPEED,SHIP_SPEED,MIN_TRADE_CARGO,pointOnRoute,routeHeading,shipmentOwner,commissionWarship,orderWarship,orderEscort,orderRepair,stepWarships,navalPosition,WARSHIP_COST,PATROL_RADIUS,tradeRange,tradePremium,tradeFleet,tradeFleetAvailable,returnMerchantHome,tradePartnerAlive,returnTradeShipment,productionTotals,populationTotal,workforceReport,productionRate,buildingJobs,beginOccupation,settlementReport,seatRepairCheck,repairSeat,consumeRegionalGrain,stepSettlement,relocateResidents,taxIncome,regionEconomy,logisticsReport,vassalFor,vassalGrantCheck,grantVassalDuchy,vassalGiftCheck,giftVassalGold,cityHousing,housingTotal,stepEconomy,controlEfficiency,controlReport,stepControl,REALM_RANKS,realmRanks,realmRank,realmPromotionCheck,promoteRealm,duchyStability,moodEfficiency,economicEfficiency,moodReport,reliefCheck,sendRelief,stepMood,RELIEF_GOLD,RELIEF_GRAIN,unrestReport,startRebellion,stepUnrest,resolveRebellions,UNREST_SECONDS,REVOLT_COOLDOWN,TAX_PER_1000,recordGrainFlow,grainGrowthMetrics,grainReserve,tradeReserve,recruitCheck,recruitGarrison,recruitmentTime,recruitQueue,cancelRecruitment,RECRUIT_QUEUE_LIMIT,stepRecruitment,garrisonUpkeep,garrisonGrainNeed,armyTroops,hasArmyAccess,segmentRegionEntry,armyRouteAccess,armyEdgeFilter,supplyEdgeFilter,remainingSupplyPath,grantTransit,TRANSIT_COST,marchCheck,sendMarch,stepArmies,orderArmy,prepareArmyOrder,orderArmyGroup,warKey,isAtWar,declareWar,mergeArmies,battleCombatants,stepBattles,RECRUIT_BATCH,RECRUIT_IRON,RECRUIT_CLOTH,RECRUIT_GOLD,SIEGE_RADIUS,SIEGE_BASE_SECONDS,captureDuchy,stepSieges,findShipmentRaid,redirectRaidedShipment,roadEdgeKey,roadTrafficValue,recordRoadTraffic,petitionFor,petitionCheck,sendPetition,arrivePetition,adjacentToFaction,initializeCampaign,initializeCampaignRecap,updateCampaign,campaignNationAlive,createRealmCouncil,getRealmCouncil,realmCapitalId,factionLedger,pacifyCheck,pacify,PACIFY_GOLD,PACIFY_GRAIN,PACIFY_SECONDS,PACIFY_COOLDOWN,storeCheck,buildStore,setSupplyPriority,STORE_COST,STORE_SHARE,SUPPLY_PRIORITY_SHARE,VASSAL_TIERS,vassalTierInfo,vassalPromotionCheck,promoteVassal,activeWarEnemies,vassalSeatName,vassalSurname,vassalDisplayName};

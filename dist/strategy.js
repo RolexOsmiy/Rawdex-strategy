@@ -91,7 +91,32 @@ function selectBotStarts(player,candidates,count=3,preferred=new Set(),anchors=[
  }
  return out;
 }
-function factionPower(state,owner){let regions=state.regions.filter(r=>r.owner===owner),population=0,production=0,buildings=0,troops=0;for(const r of regions){const workforce=workforceReport(r);for(const b of r.buildings||[]){buildings++;if(b.type==='city')population+=b.population||0;if(b.product&&b.route?.length)production+=productionRate(r,b,workforce)}let g=state.garrisons?.[r.id];if(g?.owner===owner)troops+=g.troops||0}troops+=(state.armyMoves||[]).filter(m=>m.owner===owner).reduce((n,m)=>n+m.troops,0)+(state.fieldArmies||[]).filter(m=>m.owner===owner).reduce((n,m)=>n+m.troops,0);let gold=owner==='you'?state.gold:state.factions?.[owner]?.gold||0;let total=regions.length*100+population*.1+production*3+troops*.5+Math.max(0,Math.min(1000,gold))*.04;return {total,regions:regions.length,population,production,buildings,troops,gold}}
+function factionPower(state,owner){
+ const lands=state.regions.filter(r=>r.owner===owner);
+ let population=0,production=0,territory=0,infrastructure=0;
+ for(const region of lands){
+  const workforce=workforceReport(region);
+  population+=regionalPopulation(region);
+  const garrison=state.garrisons?.[region.id];
+  const guards=garrison?.owner===owner?garrison.troops:0;
+  territory+=70*(.35+.65*duchyStability(region,guards)/100);
+  for(const building of region.buildings||[]){
+   if(building.product&&building.route?.length)production+=productionRate(region,building,workforce);
+   if(building.type==='city')infrastructure+=12*Math.max(0,(building.level||1)-1);
+   if(building.type==='port'&&building.route?.length)infrastructure+=18;
+  }
+  if(region.market?.ready)infrastructure+=18;
+ }
+ const troops=armyTroops(state,owner);
+ const fleet=(state.warships||[]).filter(ship=>ship.owner===owner&&ship.hull>0);
+ const gold=Math.max(0,(owner==='you'?state.gold:state.factions?.[owner]?.gold)||0);
+ const allies=campaignAllies(state,owner).length;
+ const economy=Math.sqrt(population)*1.8+production*3+infrastructure+90*gold/(gold+500);
+ const military=troops*.8+fleet.reduce((sum,ship)=>sum+.65*ship.hull,0);
+ const diplomacy=allies*28;
+ const total=territory+economy+military+diplomacy;
+ return {total,territory,economy,military,diplomacy};
+}
 function strategicNeighbors(state,owner){const owned=state.regions.filter(r=>r.owner===owner),frontier=state.regions.filter(r=>r.owner==='neutral'&&owned.some(o=>strategyAdj(o).includes(r.id)||strategyAdj(r).includes(o.id)));return {owned,frontier}}
 function neutralReach(state,owner,blockedId=null){const byId=new Map(state.regions.map(r=>[r.id,r])),owned=state.regions.filter(r=>r.owner===owner),seen=new Set(owned.map(r=>r.id)),queue=owned.slice(),reached=new Set();for(let i=0;i<queue.length;i++){let current=queue[i];for(const id of strategyAdj(current)){if(id===blockedId||seen.has(id))continue;let next=byId.get(id);if(!next||(next.owner!=='neutral'&&next.owner!==owner))continue;seen.add(id);queue.push(next);if(next.owner==='neutral')reached.add(id)}}return reached}
 function strategySignals(state,owner){let {owned,frontier}=strategicNeighbors(state,owner),player=state.regions.filter(r=>r.owner==='you'),pressure=frontier.filter(r=>player.some(p=>strategyAdj(r).includes(p.id)||strategyAdj(p).includes(r.id))).length,direct=owned.some(r=>player.some(p=>strategyAdj(r).includes(p.id)||strategyAdj(p).includes(r.id))),mine=factionPower(state,owner).total,enemy=factionPower(state,'you').total,ratio=mine>0?enemy/mine:1,urgency=Math.max(0,Math.min(1,(ratio-1)/1.1+(direct ? .25 : 0)+(pressure? .20:0)+(frontier.length <= 2 ? .30 : 0)));return {mine,enemy,ratio,pressure,direct,exits:frontier.length,urgency}}
