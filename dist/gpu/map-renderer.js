@@ -19,7 +19,7 @@ class PixiMapRenderer {
   this.constantEdge=this.device.createBuffer({size:4,usage:GPUBufferUsage.VERTEX});
   const visibility=GPUShaderStage.FRAGMENT;
   this.uniformLayout=this.device.createBindGroupLayout({entries:[{binding:0,visibility:visibility|GPUShaderStage.VERTEX,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:this.uniformBytes}}]});
-  this.imageUnits=[0,1,2,3,4,5,6,7,11,12,13,14,15]; // 8–10 are the shared samplers.
+  this.imageUnits=[0,1,2,3,4,5,6,7,11,12,13,14,15,16]; // 8–10 are the shared samplers.
   this.imageLayout=this.device.createBindGroupLayout({entries:[
    ...this.imageUnits.map(binding=>({binding,visibility,texture:{sampleType:'float'}})),
    ...[8,9,10].map(binding=>({binding,visibility,sampler:{type:'filtering'}}))
@@ -51,6 +51,7 @@ class PixiMapRenderer {
   const variants=[
    ['world',false,true,true,'off',false],['world',false,true,true,'write',false],
    ['world',true,true,true,'write',false],['world',false,true,true,'outside',false],
+   ['world',false,true,false,'off',true],
    ['border',false,false,false,'off',false],['forest',false,true,true,'off',true]
   ];
   await Promise.all(variants.map(async ([name,...state])=>{

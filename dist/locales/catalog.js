@@ -2464,4 +2464,20 @@ Shift + своя армия: объединить|Shift + your army: unite|Shift
 Щёлкните по карте, чтобы отправить войска к ближайшей дороге.|Click the map to send troops to the nearest road.|Klicke auf die Karte, um Truppen zur nächsten Straße zu schicken.|Cliquez sur la carte pour envoyer les troupes vers la route la plus proche.|Haz clic en el mapa para enviar las tropas al camino más cercano.|Clique no mapa para enviar as tropas à estrada mais próxima.|Kliknij mapę, by wysłać wojska na najbliższą drogę.|Birlikleri en yakın yola göndermek için haritaya tıklayın.|点击地图，将部队派往最近的道路。|マップをクリックして部隊を最寄りの道へ送ります。|지도를 클릭해 병력을 가장 가까운 길로 보내세요.|Клацніть на карті, щоб відправити війська до найближчої дороги.
 Нет дороги до выбранной точки|No road to the selected point|Keine Straße zum gewählten Punkt|Aucune route vers le point choisi|No hay camino al punto elegido|Não há estrada até ao ponto escolhido|Brak drogi do wybranego punktu|Seçilen noktaya yol yok|没有通往所选地点的道路|選択地点への道がありません|선택한 지점으로 가는 길이 없습니다|Немає дороги до вибраної точки
 Для запуска карты нужен WebGPU. Проверьте обновления Microsoft Edge WebView2 и драйвера видеокарты.|The map requires WebGPU. Check for updates to Microsoft Edge WebView2 and your graphics driver.|Die Karte benötigt WebGPU. Prüfe Microsoft Edge WebView2 und deinen Grafiktreiber auf Updates.|La carte nécessite WebGPU. Vérifiez les mises à jour de Microsoft Edge WebView2 et du pilote graphique.|El mapa necesita WebGPU. Busca actualizaciones de Microsoft Edge WebView2 y del controlador gráfico.|O mapa requer WebGPU. Verifica se há atualizações do Microsoft Edge WebView2 e do controlador gráfico.|Mapa wymaga WebGPU. Sprawdź aktualizacje Microsoft Edge WebView2 i sterownika karty graficznej.|Harita WebGPU gerektirir. Microsoft Edge WebView2 ve ekran kartı sürücüsü güncellemelerini kontrol edin.|地图需要 WebGPU。请检查 Microsoft Edge WebView2 和显卡驱动程序的更新。|マップには WebGPU が必要です。Microsoft Edge WebView2 とグラフィックドライバーの更新を確認してください。|지도에는 WebGPU가 필요합니다. Microsoft Edge WebView2와 그래픽 드라이버 업데이트를 확인하세요.|Для запуску карти потрібен WebGPU. Перевірте оновлення Microsoft Edge WebView2 і драйвера відеокарти.
+Пинск|Pinsk|Pinsk|Pinsk|Pinsk|Pinsk|Pińsk|Pinsk|平斯克|ピンスク|핀스크|Пінськ
+Пинское|Pinsk|Pinsk|Pinsk|Pinsk|Pinsk|Pińsk|Pinsk|平斯克|ピンスク|핀스크|Пінське
+Овруч|Ovruch|Owrutsch|Ovroutch|Ovruch|Ovruch|Owrucz|Ovruç|奥夫鲁奇|オーヴルチ|오우루치|Овруч
+Овручское|Ovruch|Owrutsch|Ovroutch|Ovruch|Ovruch|Owrucz|Ovruç|奥夫鲁奇|オーヴルチ|오우루치|Овруцьке
+Житомир|Zhytomyr|Schytomyr|Jytomyr|Yitomir|Jitomir|Żytomierz|Jitomir|日托米尔|ジトーミル|지토미르|Житомир
+Житомирское|Zhytomyr|Schytomyr|Jytomyr|Yitomir|Jitomir|Żytomierz|Jitomir|日托米尔|ジトーミル|지토미르|Житомирське
+Черкассы|Cherkasy|Tscherkassy|Tcherkassy|Cherkasy|Cherkasy|Czerkasy|Çerkası|切尔卡瑟|チェルカースィ|체르카시|Черкаси
+Черкасское|Cherkasy|Tscherkassy|Tcherkassy|Cherkasy|Cherkasy|Czerkasy|Çerkası|切尔卡瑟|チェルカースィ|체르카시|Черкаське
+Переяслав|Pereiaslav|Perejaslaw|Pereïaslav|Pereyáslav|Pereiaslav|Perejasław|Pereyaslav|佩列亚斯拉夫|ペレヤスラウ|페레야슬라우|Переяслав
+Переяславское|Pereiaslav|Perejaslaw|Pereïaslav|Pereyáslav|Pereiaslav|Perejasław|Pereyaslav|佩列亚斯拉夫|ペレヤスラウ|페레야슬라우|Переяславське
+Владимир|Volodymyr|Wolodymyr|Volodymyr|Volodímir|Volodymyr|Włodzimierz|Volodimir|沃洛德米尔|ヴォロディームィル|볼로디미르|Володимир
+Владимирское|Volodymyr|Wolodymyr|Volodymyr|Volodímir|Volodymyr|Włodzimierz|Volodimir|沃洛德米尔|ヴォロディームィル|볼로디미르|Володимирське
+Кременец|Kremenets|Kremenez|Kremenets|Kremenets|Kremenets|Krzemieniec|Kremenets|克列梅涅茨|クレメネツィ|크레메네츠|Кременець
+Кременецкое|Kremenets|Kremenez|Kremenets|Kremenets|Kremenets|Krzemieniec|Kremenets|克列梅涅茨|クレメネツィ|크레메네츠|Кременецьке
+Мозырь|Mozyr|Masyr|Mazyr|Mazyr|Mazyr|Mozyrz|Mazır|莫济里|マズィル|마지르|Мозир
+Мозырское|Mozyr|Masyr|Mazyr|Mazyr|Mazyr|Mozyrz|Mazır|莫济里|マズィル|마지르|Мозирське
 `.trim();

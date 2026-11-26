@@ -71,6 +71,7 @@ function loadMapTexture(path,unit,repeat=true,preserveSize=false){
 }
 const groundAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-meadow.png',0,false),waterAsset=loadMapTexture('terrain-water.png',1),forestAsset=loadMapTexture('maps/mediterranean/woodland.png',2,false),forestSpruceAsset=loadMapTexture('forest-spruce.png',3,false);
 const closeGroundAsset=loadMapTexture('terrain-close.png',2);
+const meadowBrushAsset=loadMapTexture('terrain-painted-meadow.png',16);
 const materialsAsset=loadMapTexture('terrain-materials.png',4);
 const paintedMaterials=loadMapTexture('terrain-andalusia-materials.png',12);
 const habitatAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-habitats.png',14,false);
@@ -92,11 +93,11 @@ function makeRoadTexture(){
   const coarse=vnoise(x/40,z/40),fine=vnoise(x/6.5+3,z/6.5-1);
   const patch=vnoise(x/70+17,z/70+5);
   const pebble=hash(x*3.7+1,z*3.7);
-  let grain=.885+coarse*.14+fine*.11+(pebble>.86?.16:0)+(patch-.5)*.05;
+  const grain=.85+coarse*.17+fine*.12+(pebble>.94?.19:0)+(patch-.5)*.085;
   const i=(z*n+x)*4;
-  data[i]=Math.min(255,Math.round(216*grain));
-  data[i+1]=Math.min(255,Math.round(199*grain));
-  data[i+2]=Math.min(255,Math.round(162*grain));
+  data[i]=Math.min(255,Math.round(223*grain));
+  data[i+1]=Math.min(255,Math.round(198*grain));
+  data[i+2]=Math.min(255,Math.round(147*grain));
   data[i+3]=255;
  }
  let texture=gl.createTexture();gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,n,n,0,gl.RGBA,gl.UNSIGNED_BYTE,data);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.generateMipmap(gl.TEXTURE_2D);return texture
@@ -1517,20 +1518,20 @@ function forestSprites(){
   const {x,z,y,kind,size,flip}=tree;
   const riparian=kind==='palm'||kind==='poplar';
   const target=riparian?floodplain:kind==='oak'?deciduous:kind==='spruce'?pines:scrub;
-  const half=size*({oak:2.26,spruce:1.49,scrub:1.32,palm:2.35,poplar:1.70}[kind]),height=size*({oak:4.56,spruce:5.35,scrub:2.46,palm:5.24,poplar:5.12}[kind]);
+  const half=size*({oak:2.43,spruce:1.54,scrub:1.32,palm:2.35,poplar:1.70}[kind]),height=size*({oak:4.82,spruce:5.50,scrub:2.46,palm:5.24,poplar:5.12}[kind]);
   if(kind==='oak'||riparian){
    const variant=riparian?Math.floor(rand()*2)+(kind==='poplar'?2:0):Math.floor(rand()*4),u=(variant%2)*.5,v=Math.floor(variant/2)*.5;
    appendTreeSprite(target,x,z,y,half,height,flip,u+.002,u+.498,v+.002,v+.498);
   }else appendTreeSprite(target,x,z,y,half,height,flip,kind==='scrub'?.005:0,kind==='scrub'?.495:1);
   if(kind==='scrub'&&size<.68)continue;
-  shadow.push({x:x+half*.40,z:z+half*.38,rx:half*1.5,rz:half*.97,opacity:.24});
+  shadow.push({x:x+half*.56,z:z+half*.44,rx:half*1.62,rz:half*1.04,opacity:.28});
  }
  return {...packForestVertices(deciduous),spruce:packForestVertices(pines),scrub:packForestVertices(scrub),floodplain:packForestVertices(floodplain),
   shadows:shadow,trees:trees.length};
 }
 const coastalWoods=makeCoastalWoods();
 const treeProgram=gl.createMapProgram('forest');
-const treeLoc={orchard:gl.getUniformLocation(treeProgram,'uPaintPlots'),p:gl.getAttribLocation(treeProgram,'aPosition'),uv:gl.getAttribLocation(treeProgram,'aUV'),offset:gl.getAttribLocation(treeProgram,'aOffset'),orientation:gl.getUniformLocation(treeProgram,'uOrientation'),tilt:gl.getUniformLocation(treeProgram,'uTilt'),center:gl.getUniformLocation(treeProgram,'uCenter'),viewport:gl.getUniformLocation(treeProgram,'uViewport'),scale:gl.getUniformLocation(treeProgram,'uScale'),texture:gl.getUniformLocation(treeProgram,'uTree'),mask:gl.getUniformLocation(treeProgram,'uForestMask')};
+const treeLoc={tone:gl.getUniformLocation(treeProgram,'uWidth'),orchard:gl.getUniformLocation(treeProgram,'uPaintPlots'),p:gl.getAttribLocation(treeProgram,'aPosition'),uv:gl.getAttribLocation(treeProgram,'aUV'),offset:gl.getAttribLocation(treeProgram,'aOffset'),orientation:gl.getUniformLocation(treeProgram,'uOrientation'),tilt:gl.getUniformLocation(treeProgram,'uTilt'),center:gl.getUniformLocation(treeProgram,'uCenter'),viewport:gl.getUniformLocation(treeProgram,'uViewport'),scale:gl.getUniformLocation(treeProgram,'uScale'),texture:gl.getUniformLocation(treeProgram,'uTree'),mask:gl.getUniformLocation(treeProgram,'uForestMask')};
 let oliveBuffer=null,oliveSignature='';
 function rebuildOlives(){
  if(!oliveAsset)return;
@@ -1566,6 +1567,18 @@ function rebuildOlives(){
 }
 const shadowOctagon=Array.from({length:8},(_,i)=>[Math.cos(i*Math.PI/4),Math.sin(i*Math.PI/4)]);
 let buildingShadows=null,buildingShadowSignature='';
+const actorShadowVertices=[],actorShadows={buffer:gl.createBuffer(),count:0};
+function addActorShadow(x,z,width,depth,ground=null){
+ if(!preferences.actorShadows)return;
+ const center=ground??roadGround(x,z);
+ const rim=shadowOctagon.map(([u,v])=>{
+  const px=x+u*width,pz=z+v*depth;
+  return [px,(ground??roadGround(px,pz))+.346,pz,0,0,.5+u*.5,.5+v*.5];
+ });
+ for(let i=0;i<rim.length;i++){
+  actorShadowVertices.push(x,center+.346,z,0,0,.5,.5,...rim[i],...rim[(i+1)%rim.length]);
+ }
+}
 function rebuildBuildingShadows(){
  const sites=[];
  for(const r of state.regions){
@@ -1591,18 +1604,29 @@ function rebuildBuildingShadows(){
  if(buildingShadows)gl.deleteBuffer(buildingShadows.buffer);
  buildingShadows=packForestVertices(data);
 }
-function drawForest(){if(!forestAsset.ready)return;gl.useProgram(treeProgram);gl.uniform1f(treeLoc.orchard,0);gl.uniform2f(treeLoc.center,cam.x,cam.z);gl.uniform2f(treeLoc.viewport,canvas.width,canvas.height);gl.uniform1f(treeLoc.scale,cam.scale);cameraUniforms(treeLoc);gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.uniform1i(treeLoc.mask,5);gl.enableVertexAttribArray(treeLoc.p);gl.enableVertexAttribArray(treeLoc.uv);gl.enableVertexAttribArray(treeLoc.offset);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
- function group(mesh,asset,unit){if(!mesh.count)return;gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,asset.texture);gl.uniform1i(treeLoc.texture,unit);gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);gl.vertexAttribPointer(treeLoc.p,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(treeLoc.offset,2,gl.FLOAT,false,28,12);gl.vertexAttribPointer(treeLoc.uv,2,gl.FLOAT,false,28,20);gl.drawArrays(gl.TRIANGLES,0,mesh.count)}
+function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgram(treeProgram);gl.uniform1f(treeLoc.orchard,0);gl.uniform2f(treeLoc.center,cam.x,cam.z);gl.uniform2f(treeLoc.viewport,canvas.width,canvas.height);gl.uniform1f(treeLoc.scale,cam.scale);cameraUniforms(treeLoc);gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.uniform1i(treeLoc.mask,5);gl.enableVertexAttribArray(treeLoc.p);gl.enableVertexAttribArray(treeLoc.uv);gl.enableVertexAttribArray(treeLoc.offset);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+ function group(mesh,asset,unit,cool=false){if(!mesh.count)return;gl.uniform1f(treeLoc.tone,cool?1:0);gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,asset.texture);gl.uniform1i(treeLoc.texture,unit);gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);gl.vertexAttribPointer(treeLoc.p,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(treeLoc.offset,2,gl.FLOAT,false,28,12);gl.vertexAttribPointer(treeLoc.uv,2,gl.FLOAT,false,28,20);gl.drawArrays(gl.TRIANGLES,0,mesh.count)}
+ if(shadowsOnly){
+  if(actorShadowVertices.length){
+   gl.bindBuffer(gl.ARRAY_BUFFER,actorShadows.buffer);
+   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(actorShadowVertices),gl.DYNAMIC_DRAW);
+   actorShadows.count=actorShadowVertices.length/7;
+   gl.uniform1f(treeLoc.orchard,4);gl.depthMask(false);
+   group(actorShadows,forestAsset,2);
+   gl.depthMask(true);
+  }
+ }else{
  if(buildingShadows?.count&&cam.scale>=.006){
   gl.uniform1f(treeLoc.orchard,3);gl.depthMask(false);
   group(buildingShadows,forestAsset,2);
   gl.depthMask(true);gl.uniform1f(treeLoc.orchard,0);
  }
  if(coastalWoods&&woodlandAsset.ready)group(coastalWoods.crowns,woodlandAsset,2);
- if(woodlandAsset.ready)group(forestSpriteBuffer,woodlandAsset,2);if(forestSpruceAsset.ready)group(forestSpriteBuffer.spruce,forestSpruceAsset,3);
+ if(woodlandAsset.ready)group(forestSpriteBuffer,woodlandAsset,2);if(forestSpruceAsset.ready)group(forestSpriteBuffer.spruce,forestSpruceAsset,3,true);
  if(floodplainAsset.ready)group(forestSpriteBuffer.floodplain,floodplainAsset,2);
  if(forestSpriteBuffer.scrub.count&&oliveAsset?.ready)group(forestSpriteBuffer.scrub,oliveAsset,2);
  if(oliveBuffer?.count&&oliveAsset.ready){gl.uniform1f(treeLoc.orchard,1);group(oliveBuffer,oliveAsset,2)}
+ }
  gl.disable(gl.BLEND);gl.useProgram(prog);for(const i of [treeLoc.p,treeLoc.uv,treeLoc.offset])if(i!==loc.p&&i!==loc.c)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(loc.p);gl.enableVertexAttribArray(loc.c)}
 
 // One compact exclusion texture keeps trees away from placed buildings, including free placements.
@@ -2350,7 +2374,21 @@ function placementGroundAtScreen(px,py){
  return hit;
 }
 function moveCameraScreen(dx,dy){let yaw=cam.yaw||0,c=Math.cos(yaw),s=Math.sin(yaw),sx=dx*2/(canvas.clientHeight*cam.scale),sz=dy*2*Math.hypot(1,cam.tilt??DEFAULT_CAMERA_TILT)/(canvas.clientHeight*cam.scale*(cam.tilt??DEFAULT_CAMERA_TILT));cam.x=Math.max(-300,Math.min(WORLD_WIDTH+300,cam.x-c*sx-s*sz));cam.z=Math.max(-200,Math.min(WORLD_HEIGHT+290,cam.z+s*sx-c*sz));dirtyLabels=true}
-const cameraKeys=new Set();function updateCamera(dt){if(!dt||!cameraKeys.size)return;let speed=280*dt,dx=(cameraKeys.has('KeyD')||cameraKeys.has('ArrowRight')?1:0)-(cameraKeys.has('KeyA')||cameraKeys.has('ArrowLeft')?1:0),dy=(cameraKeys.has('KeyS')||cameraKeys.has('ArrowDown')?1:0)-(cameraKeys.has('KeyW')||cameraKeys.has('ArrowUp')?1:0);if(dx||dy)moveCameraScreen(-dx*speed,-dy*speed);let rotate=(cameraKeys.has('KeyE')?1:0)-(cameraKeys.has('KeyQ')?1:0),tilt=(cameraKeys.has('KeyR')?1:0)-(cameraKeys.has('KeyF')?1:0);if(rotate||tilt){cam.yaw=(cam.yaw||0)+rotate*dt*.9;cam.tilt=Math.max(.4,Math.min(1.8,(cam.tilt??DEFAULT_CAMERA_TILT)+tilt*dt*.8));dirtyLabels=true}}
+const cameraKeys=new Map();
+function updateCamera(dt){
+ if(!dt||!cameraKeys.size)return;
+ const actions=new Set(cameraKeys.values());
+ const axis=(positive,negative)=>Number(actions.has(positive))-Number(actions.has(negative));
+ const speed=280*dt*preferences.panSpeed/100;
+ const dx=axis('cameraRight','cameraLeft'),dy=axis('cameraDown','cameraUp');
+ if(dx||dy)moveCameraScreen(-dx*speed,-dy*speed);
+ const rotate=axis('turnRight','turnLeft'),tilt=axis('tiltUp','tiltDown');
+ if(rotate||tilt){
+  cam.yaw=(cam.yaw||0)+rotate*dt*.9;
+  cam.tilt=Math.max(.4,Math.min(1.8,(cam.tilt??DEFAULT_CAMERA_TILT)+tilt*dt*.8));
+  dirtyLabels=true;
+ }
+}
 
 // Labels show a regional summary, not just the inhabitants of the capital city.
 function duchyPopulation(r){return (r.buildings||[]).filter(b=>b.type==='city').reduce((n,b)=>n+Math.max(0,b.population||0),0)}
@@ -2493,7 +2531,7 @@ function cityAlertRow(region){
  }
  return row;
 }
-const majorSettlements=new Set(GAME_MAP?['lisbon','seville','malaga','barcelona','genoa','venice','palermo','tunis','algiers','athens','istanbul','alexandria','beirut']:['pomorskie','mazowieckie','poznańskie','wileńskie','Prusy Książęce','Księstwo Kurlandii i Semigalii']);
+const majorSettlements=new Set(GAME_MAP?['lisbon','seville','malaga','barcelona','genoa','venice','palermo','tunis','algiers','athens','istanbul','alexandria','beirut']:['pomorskie','mazowieckie','poznańskie','wileńskie','Prusy Książęce','Księstwo Kurlandii i Semigalii','kijowskie','pinsk','zytomierz','cherkasy','pereiaslav','mozyrz']);
 function recruitMapBadge(region){
  const count=(state.recruitments||[]).reduce((sum,order)=>sum+(order.regionId===region.id&&order.owner===region.owner?order.troops:0),0);
  return count?'<span class="garrison-badge">⌛ СБОР '+count+'</span>':'';
@@ -2772,26 +2810,32 @@ function rebuildRoads(){
    if(smooth.length<2)return;
    const sig=chain[0]+'|'+chain[chain.length-1];
    const base=.55+hashString('w'+sig)*.23,phase=hashString('p'+sig)*6.283;
-   const cum=[0];
-   for(let i=1;i<smooth.length;i++)cum.push(cum[i-1]+Math.hypot(smooth[i].x-smooth[i-1].x,smooth[i].z-smooth[i-1].z));
-   const width=t=>base*(1+.07*Math.sin(t*.55+phase));
+   const samples=[smooth[0]];
    for(let i=1;i<smooth.length;i++){
-    const a=smooth[i-1],b=smooth[i];
-    const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);
-    if(!len)continue;
-    const nx=-dz/len,nz=dx/len,wa=width(cum[i-1]),wb=width(cum[i]);
-    const corners=[
-     [a.x+nx*wa,roadGround(a.x+nx*wa,a.z+nz*wa)+.30,a.z+nz*wa],
-     [b.x+nx*wb,roadGround(b.x+nx*wb,b.z+nz*wb)+.30,b.z+nz*wb],
-     [b.x-nx*wb,roadGround(b.x-nx*wb,b.z-nz*wb)+.30,b.z-nz*wb],
-     [a.x-nx*wa,roadGround(a.x-nx*wa,a.z-nz*wa)+.30,a.z-nz*wa]];
-    for(const n of [0,1,2,0,2,3])vertex(out,...corners[n],[roadCol[0],n<2?2:4,roadCol[2]]);
+    const from=smooth[i-1],to=smooth[i],steps=Math.max(1,Math.ceil(distance(from,to)/2.4));
+    for(let step=1;step<=steps;step++){
+     const t=step/steps;samples.push({x:from.x+(to.x-from.x)*t,z:from.z+(to.z-from.z)*t});
+    }
+   }
+   let along=0,previous=null;
+   for(let i=0;i<samples.length;i++){
+    const p=samples[i],a=samples[Math.max(0,i-1)],b=samples[Math.min(samples.length-1,i+1)];
+    if(i)along+=distance(a,p);
+    const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;
+    const width=base*(1+.08*Math.sin(along*.55+phase)),nx=-dz/len*width,nz=dx/len*width;
+    const section=[[p.x+nx,roadGround(p.x+nx,p.z+nz)+.304,p.z+nz],
+     [p.x-nx,roadGround(p.x-nx,p.z-nz)+.304,p.z-nz]];
+    if(previous){
+     const corners=[previous[0],section[0],section[1],previous[1]];
+     for(const n of [0,1,2,0,2,3])vertex(out,...corners[n],[roadCol[0],n<2?2:4,roadCol[2]]);
+    }
+    previous=section;
    }
   };
   // Worn patches under junctions hide the wedge gaps where ribbons meet.
   for(const [key,node] of graph.nodes){
    if(node.edges.size===2)continue;
-   const y=roadGround(node.x,node.z)+.295,r=.42;
+   const y=roadGround(node.x,node.z)+.295,r=.56;
    for(let i=0;i<6;i++){
     const a0=i/6*Math.PI*2,a1=(i+1)/6*Math.PI*2;
     vertex(roads,node.x,y,node.z,[.58,.50,.36]);
@@ -2824,15 +2868,15 @@ function rebuildRoads(){
 function drawSelectedRoute(){let ship=selectedCargo,path=ship?.path;if(!path?.length||!state.economy?.shipments.includes(ship)){if(selectedRouteBuffer)gl.deleteBuffer(selectedRouteBuffer.buffer);selectedRouteBuffer=null;selectedRoutePath=null;return}if(path!==selectedRoutePath){if(selectedRouteBuffer)gl.deleteBuffer(selectedRouteBuffer.buffer);let out=[],along=0;for(let i=1;i<path.length;i++){let a=path[i-1],b=path[i],dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(!len)continue;let nx=-dz/len*.30,nz=dx/len*.30,steps=Math.max(1,Math.ceil(len/5));for(let j=0;j<steps;j++){let t=j/steps,u=(j+1)/steps,x=a.x+dx*t,z=a.z+dz*t,x2=a.x+dx*u,z2=a.z+dz*u,at=along+len*(t+u)/2,atSea=ship.mode==='sea'&&at>=ship.seaStart&&at<=ship.seaEnd,y=atSea?-.65:roadGround(x,z)+1.1,y2=atSea?-.65:roadGround(x2,z2)+1.1;quad(out,[x+nx,y,z+nz],[x2+nx,y2,z2+nz],[x2-nx,y2,z2-nz],[x-nx,y,z-nz],[.94,.74,.34])}along+=len}selectedRouteBuffer=makeBuffer(out);selectedRoutePath=path}drawBuffer(selectedRouteBuffer)}
 function rebuildTrafficRoads(){let out=[],traffic=state.economy?.roadTraffic,now=state.economy?.seconds||0;if(traffic&&state.network)for(const edge of state.network.edges.values()){let [a,b]=edge,flow=roadTrafficValue(traffic.get(roadEdgeKey(a,b)),now);if(flow<.28)continue;let dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(!len)continue;let width=.28+Math.min(.22,flow*.025),nx=-dz/len*width,nz=dx/len*width,strength=Math.min(1,flow/5),col=[.65+.12*strength,.55+.12*strength,.38+.09*strength],steps=Math.max(1,Math.ceil(len/3));for(let j=0;j<steps;j++){let t=j/steps,u=(j+1)/steps,x1=a.x+dx*t,z1=a.z+dz*t,x2=a.x+dx*u,z2=a.z+dz*u;quad(out,[x1+nx,roadGround(x1+nx,z1+nz)+.303,z1+nz],[x2+nx,roadGround(x2+nx,z2+nz)+.303,z2+nz],[x2-nx,roadGround(x2-nx,z2-nz)+.303,z2-nz],[x1-nx,roadGround(x1-nx,z1-nz)+.303,z1-nz],col)}}if(trafficBuffer)gl.deleteBuffer(trafficBuffer.buffer);trafficBuffer=makeBuffer(out);trafficRebuildAt=now+8;if(state.economy)state.economy.trafficDirty=false}
 function wheel(out,x,y,z,r,phase){
- const metal=[.30,.28,.24],wood=[.49,.34,.21];
+ const metal=[.32,.31,.27],wood=[.63,.43,.24];
  const point=(a,scale)=>[x+Math.cos(a)*r*scale,y+Math.sin(a)*r*scale,z];
  for(let i=0;i<10;i++){
   const a=i*Math.PI/5+phase,b=a+Math.PI/5;
   quad(out,point(a,1),point(b,1),point(b,.77),point(a,.77),metal);
  }
- for(let i=0;i<5;i++){
-  const a=i*Math.PI*2/5+phase;
-  tri(out,[x,y,z],point(a-.078,.84),point(a+.078,.84),wood);
+ for(let i=0;i<7;i++){
+  const a=i*Math.PI*2/7+phase;
+  quad(out,point(a-.18,.16),point(a-.052,.85),point(a+.052,.85),point(a+.18,.16),wood);
  }
  cube(out,x,y-r*.17,z,r*.32,r*.34,r*.24,wood);
 }
@@ -3129,6 +3173,55 @@ const clothCartLoad=[];
 clothRoll(clothCartLoad,-.13,1.01,-.25,1.47,.24,loomMadder);
 clothRoll(clothCartLoad,-.13,1.01,.26,1.52,.24,loomIndigo);
 clothRoll(clothCartLoad,-.16,1.40,0,1.41,.22,loomLinen);
+// Baked low-poly forms, with the same soft upper-left light as the terrain.
+function paintedOval(out,x,y,z,rx,ry,rz,color,sides=8){
+ const rings=[-.72,0,.72],light=[-.47,.78,-.36];
+ const point=(angle,ring)=>{
+  const width=Math.sqrt(1-ring*ring);
+  return [x+rx*Math.cos(angle)*width,y+ry*ring,z+rz*Math.sin(angle)*width];
+ };
+ for(let i=0;i<sides;i++){
+  const a=i*2*Math.PI/sides,b=(i+1)*2*Math.PI/sides,mid=(a+b)*.5;
+  const lightAt=h=>tint(color,.82+.32*Math.max(0,Math.cos(mid)*light[0]+h*light[1]+Math.sin(mid)*light[2]));
+  for(let j=0;j<rings.length-1;j++){
+   const t=rings[j],u=rings[j+1];
+   quad(out,point(a,t),point(b,t),point(b,u),point(a,u),lightAt((t+u)*.5));
+  }
+  tri(out,point(a,rings[0]),[x,y-ry,z],point(b,rings[0]),lightAt(-1));
+  tri(out,point(a,rings[2]),point(b,rings[2]),[x,y+ry,z],lightAt(1));
+ }
+}
+function appendPaintedModel(out,mesh,x,y,z,angle){
+ const c=Math.cos(angle),s=Math.sin(angle);
+ for(let i=0;i<mesh.length;i+=6){
+  const u=mesh[i],v=mesh[i+2];
+  out.push(x+u*c-v*s,y+mesh[i+1],z+u*s+v*c,mesh[i+3],mesh[i+4],mesh[i+5]);
+ }
+}
+const wagonPlanks=[],wagonSacks=[],wagonHorse=[];
+const oakCart=[.49,.33,.20],oakTrim=[.62,.45,.27],chestnut=[.53,.31,.20],horseLeather=[.22,.15,.11];
+cube(wagonPlanks,0,.38,0,1.86,.13,1.05,oakCart);
+for(const side of [-1,1]){
+ for(let board=0;board<3;board++)cube(wagonPlanks,0,.49+board*.113,side*.49,1.94,.103,.10,board%2?oakTrim:oakCart);
+ for(const x of [-.67,.63])cube(wagonPlanks,x,.43,side*.565,.09,.44,.09,[.36,.24,.15]);
+ for(const x of [-.94,.94])for(let board=0;board<2;board++)
+  cube(wagonPlanks,x,.49+board*.14,0,.11,.13,.98,board?oakTrim:oakCart);
+ timberBeam(wagonPlanks,[.70,.47,side*.39],[1.85,.52,side*.22],.04,[.34,.23,.14]);
+}
+for(const [x,y,z,shift] of [[-.53,.75,-.24,0],[-.04,.78,.24,.06],[.48,.75,-.21,0],[-.34,.95,.19,.04]]){
+ paintedOval(wagonSacks,x,y,z,.30,.135,.235,[.72+shift,.62+shift,.43+shift],6);
+ timberBeam(wagonSacks,[x-.12,y+.126,z-.09],[x+.17,y+.126,z+.06],.026,[.51,.43,.31]);
+}
+paintedOval(wagonHorse,1.55,.83,0,.59,.35,.235,chestnut,8);
+paintedOval(wagonHorse,1.91,1.06,0,.27,.34,.19,[.56,.33,.21],6);
+paintedOval(wagonHorse,2.16,1.25,0,.28,.165,.135,[.56,.34,.23],6);
+paintedOval(wagonHorse,2.34,1.155,0,.14,.105,.11,[.36,.24,.19],6);
+timberBeam(wagonHorse,[1.77,1.12,0],[2.06,1.43,0],.11,[.25,.16,.12]);
+timberBeam(wagonHorse,[1.07,.93,0],[.93,.52,-.055],.067,[.28,.17,.11]);
+for(const z of [-.072,.072]){
+ timberBeam(wagonHorse,[2.13,1.33,z],[2.15,1.51,z],.042,chestnut);
+ timberBeam(wagonHorse,[2.18,1.23,z],[1.78,.88,Math.sign(z)*.20],.022,horseLeather);
+}
 function drawCarts(){
  if(!state.economy||(!state.economy.shipments.length&&!state._harborUnloading?.size))return;
  const v=[],visible=[];
@@ -3145,7 +3238,7 @@ function drawCarts(){
  let localDetail=Math.max(8,32-visible.length);
  for(const {ship,progress,point:p,strategic} of visible){
  const along=routeDistanceAt(ship.path,progress),phase=along/.35;
- const y=roadGround(p.x,p.z)+1.1+Math.sin(phase*2)*.05;
+ const y=roadGround(p.x,p.z)+.34+Math.sin(phase*2)*.055;
  if(!inMapViewport(p.x,p.z,y))continue;
  const angle=routeHeading(ship.path,progress);
  const color={grain:[.8,.69,.38],wood:[.48,.34,.23],iron:[.55,.56,.56],cloth:[.68,.44,.47],equipment:[.72,.52,.27]}[ship.good],parts=[];
@@ -3163,35 +3256,46 @@ function drawCarts(){
  }
  // The last water gap is handled by the quay crew. Road wagons stop at the shore.
  if(GAME_MAP&&ship.mode==='sea'&&isSeaBackground(p.x,p.z))continue;
+ if(cam.scale>=.006)addActorShadow(p.x+.24,p.z+.24,2.18,1.01);
  if(!close){
-  cube(parts,0,.46,0,1.9,.45,1.1,factionColor);
+  cube(parts,0,.42,0,1.9,.42,1.08,oakCart);
   if(ship.amount>0)cube(parts,-.13,.90,0,1.5,.23+tiers*.16,.90,color);
-  cube(parts,1.15,.65,0,1.2,.8,.55,[.45,.34,.26]);
+  cube(parts,1.43,.47,0,1.14,.56,.49,chestnut);
+  cube(parts,2.06,.84,0,.41,.30,.27,[.52,.34,.24]);
  }
  else{
-  cube(parts,0,.45,0,1.97,.35,1.13,factionColor);
-  for(const z of [-.55,.55])cube(parts,0,.78,z,1.97,.19,.09,factionColor);
+  parts.push(...wagonPlanks);
+  cube(parts,-.08,.55,-.56,.31,.26,.045,factionColor);
   const supplyCargo=(ship.kind==='supply'||ship.kind==='botSupply'||ship.kind==='industry')?ship.cargo:null;
   const mainCargo=supplyCargo?Math.max(...Object.values(supplyCargo)):0;
   if(mainCargo>0&&supplyCargo.wood===mainCargo)parts.push(...timberCartLoad);
   else if(mainCargo>0&&supplyCargo.iron===mainCargo)parts.push(...oreCartLoad);
   else if(mainCargo>0&&supplyCargo.cloth===mainCargo)parts.push(...clothCartLoad);
-  else if(ship.amount>0)cube(parts,-.10,.80,0,1.30,.50,.85,color);
+  else if(ship.amount>0){
+   if(ship.good==='grain'||mainCargo>0&&supplyCargo.grain===mainCargo)parts.push(...wagonSacks);
+   else cube(parts,-.10,.77,0,1.30,.42,.85,color);
+  }
   if(ship.amount>0)for(let tier=1;tier<tiers;tier++){
    const height=1.23+(tier-1)*.28;
    if(ship.good==='wood')millLog(parts,-.15,height,(tier%2?1:-1)*.21,1.43,.13);
+   else if(ship.good==='grain')paintedOval(parts,-.31+(tier%2)*.52,height-.17,0,.27,.104,.21,[.74,.63,.44],6);
    else cube(parts,-.31+(tier%2)*.52,height,0,.54,.27,.67,color);
   }
   for(const x of [-.58,.57])for(const z of [-.61,.61])wheel(parts,x,.4,z,.36,phase);
-  for(const x of [-.66,.59])cube(parts,x,.80,0,.09,.52,1.02,[.59,.45,.27]);
- // Horse and legs bob on the same forward axis as the wagon.
- cube(parts,1.5,.85,0,1,.75,.55,[.45,.34,.26]);cube(parts,2.05,1.1,0,.45,.55,.48,[.45,.34,.26]);for(let i=0;i<4;i++)cube(parts,1.25+(i%2)*.55,.24+Math.sin(phase+i*Math.PI)*.08,(i<2?-.18:.18),.12,.55,.12,[.28,.22,.18]);
+  parts.push(...wagonHorse);
+  for(let leg=0;leg<4;leg++){
+   const x=leg%2?1.87:1.20,z=leg<2?-.16:.16;
+   const stride=ship.supplyBlocked?0:Math.sin(phase+(leg===0||leg===3?0:Math.PI))*.125;
+   timberBeam(parts,[x,.68,z],[x+stride,.37,z],.092,chestnut);
+   timberBeam(parts,[x+stride,.37,z],[x+stride*1.32,.083,z],.070,horseLeather);
+   cube(parts,x+stride*1.32,.038,z,.095,.076,.084,horseLeather);
+  }
  if(ship.kind==='export'||ship.kind==='tradeReturn'){cube(parts,-2.4,.42,0,1.6,.4,1,[.38,.28,.18]);cube(parts,-2.4,.85,0,1.2,.65,.8,[.70,.58,.40]);wheel(parts,-2.8,.35,-.54,.3,phase);wheel(parts,-2,.35,-.54,.3,phase);wheel(parts,-2.8,.35,.54,.3,phase);wheel(parts,-2,.35,.54,.3,phase);cube(parts,-.3,1.6,-.35,.08,2.2,.08,[.33,.24,.14]);cube(parts,-.3,2.35,-.06,.07,.6,.58,factionColor)}
  if(ship.kind==='petition'){// A diplomatic column: baggage, standard and armed escort, with no combat effect.
  for(let wagon=1;wagon<=2;wagon++){let x=-wagon*2.4;cube(parts,x,.42,0,1.5,.35,.9,[.38,.28,.18]);cube(parts,x,.85,0,1.1,.65,.75,wagon===1?[.71,.57,.31]:[.59,.55,.44]);wheel(parts,x-.42,.35,-.48,.28,phase);wheel(parts,x+.42,.35,-.48,.28,phase);wheel(parts,x-.42,.35,.48,.28,phase);wheel(parts,x+.42,.35,.48,.28,phase)}
  cube(parts,-.15,1.3,-.36,.09,2.0,.09,[.33,.24,.14]);cube(parts,-.15,2.05,-.1,.07,.7,.55,factionColor);cube(parts,-.17,2.13,-.1,.12,.18,.18,[.96,.81,.43]);
  for(let i=0;i<4;i++){let x=-1.2-(i>>1)*2.7,z=(i%2?1:-1)*1.15,bob=Math.sin(phase+i)*.07;cube(parts,x,.52+bob,z,.32,.74,.27,factionColor);cube(parts,x,1.02+bob,z,.27,.27,.27,[.79,.68,.50]);cube(parts,x+.18,.75+bob,z,.08,1.55,.08,[.40,.33,.22]);cube(parts,x,1.18+bob,z,.35,.1,.33,[.55,.56,.50])}}
- }let co=Math.cos(angle),si=Math.sin(angle);for(let i=0;i<parts.length;i+=6){let x=parts[i],z=parts[i+2];parts[i]=p.x+x*co-z*si;parts[i+1]+=y;parts[i+2]=p.z+x*si+z*co}v.push(...parts);
+ }appendPaintedModel(v,parts,p.x,y,p.z,angle);
  }if(!cartBuffer)cartBuffer={buffer:gl.createBuffer(),count:0};gl.bindBuffer(gl.ARRAY_BUFFER,cartBuffer.buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(v),gl.DYNAMIC_DRAW);cartBuffer.count=v.length/6;drawBuffer(cartBuffer)}
 let marchBuffer=null,selectedArmy=null,selectedGroup=[],selectedCargoGroup=[];const marchElements=new Map();
 const armyRouteBuffers=new Map();
@@ -3244,70 +3348,96 @@ function drawSelectedArmyRoutes(){
  }
 }
 function armyPathSample(m,at){if(m._lengthPath!==m.path){m._lengthPath=m.path;m._heights=m.path.map(p=>roadGround(p.x,p.z));m._lengths=[0];for(let i=1;i<m.path.length;i++)m._lengths.push(m._lengths[i-1]+distance(m.path[i-1],m.path[i]));m._length=m._lengths.at(-1)}let d=Math.max(0,Math.min(m._length,at)),lo=1,hi=m._lengths.length-1;while(lo<hi){let mid=(lo+hi)>>1;if(m._lengths[mid]<d)lo=mid+1;else hi=mid}let a=m.path[lo-1],b=m.path[lo],length=m._lengths[lo]-m._lengths[lo-1],t=length?(d-m._lengths[lo-1])/length:0;return {x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:m._heights[lo-1]+(m._heights[lo]-m._heights[lo-1])*t,angle:Math.atan2(b.z-a.z,b.x-a.x)}}
-function drawMarches(){
- const moves=state.armyMoves||[];
- if(!moves.length) return;
- const visible=[],transports=[];
- for(const march of moves){
-  armyPathSample(march,0);
-  const elapsed=armyMarchElapsed(march,simClock);
-  const travel=routeDistanceAt(march.path,elapsed/march.duration);
-  const lead=armyPathSample(march,travel);
-  if(march.path.landingId!=null&&travel>=march.path.seaStart&&travel<=march.path.seaEnd){
-   if(inMapViewport(lead.x,lead.z,4)&&navigableWater(lead)) transports.push({...lead,color:FACTION_COLORS[march.owner]||FACTION_COLORS.you});
-   continue;
-  }
-  if(inMapViewport(lead.x,lead.z,lead.y,260)) visible.push({march,travel,lead,elapsed});
- }
- const out=[];
- for(const {x,z,angle,color} of transports)placeShip(out,shipModel(color,false,cam.scale>=.008),x,-1.15,z,angle);
- const close=cam.scale>=.011, medium=cam.scale>=.006;
- // Use smaller formations in a crowded view while preserving the actual headcount in the label.
- const allotment=Math.min(close?160:medium?40:10,Math.max(4,Math.floor((close?240:medium?210:180)/visible.length)));
- for(const {march,travel,lead,elapsed} of visible){
-  const color=vassalById(state,march.vassalId,march.owner)?.color||FACTION_COLORS[march.owner]||FACTION_COLORS.you;
-  const visibleTroops=Math.min(allotment,Math.max(1,Math.ceil(march.troops)));
-  const formation=march.formingCompany&&!motionReduced()?Math.min(1,.22+elapsed*.56):1;
-  const count=Math.max(1,Math.ceil(visibleTroops*formation));
-  const phase=elapsed*5;
-  for(let i=0;i<count;i++){
-   const p=armyPathSample(march,travel-Math.floor(i/4)*.65), side=(i%4-1.5)*.38;
-   const x=p.x-Math.sin(p.angle)*side,z=p.z+Math.cos(p.angle)*side,y=p.y+1.1;
-   const bob=march.waiting?0:Math.sin(phase+i*.7)*.055;
-   cube(out,x,y+.3+bob,z,.23,.51,.20,color);
-   if(medium)cube(out,x,y+.72+bob,z,.16,.17,.17,[.80,.69,.53]);
-   if(close){
-    const helmet=[.42,.45,.45],boots=[.29,.24,.19];
-    cone(out,x,y+.84+bob,z,.115,.12,helmet,6);
-    for(const side of [-1,1]){
-     const step=Math.sin(phase+i*.7)*side*.045;
-     cube(out,x+side*.06,y+.055+step,z,.075,.24,.088,boots);
-    }
-    tri(out,[x-.17,y+.64+bob,z+.11],[x-.17,y+.37+bob,z+.12],[x+.06,y+.53+bob,z+.15],tint(color,.72));
-    if(i%8===0)timberBeam(out,[x+.13,y+.34,z],[x+.18,y+1.25,z+.08],.036,[.47,.37,.25]);
+const infantryModels=new WeakMap(),armyPaintHeading=new WeakMap();
+function infantryModel(livery,detail){
+ let models=infantryModels.get(livery);
+ if(!models){models=[];infantryModels.set(livery,models)}
+ if(models[detail])return models[detail];
+ const mesh=[];
+ const steel=[.68,.75,.78],leather=[.24,.17,.13],skin=[.72,.54,.38];
+ const coat=tint(livery,.96);
+ cube(mesh,0,.24,0,.31,.45,.29,coat);
+ if(!detail){
+  cube(mesh,.015,.69,0,.24,.20,.25,steel);
+  cube(mesh,.18,.38,.096,.045,.29,.17,[.80,.59,.26]);
+ }else{
+  cube(mesh,0,.60,0,.188,.19,.19,skin);
+  paintedOval(mesh,-.023,.835,0,.143,.15,.137,steel,detail===2?7:5);
+  cube(mesh,.003,.77,0,.29,.043,.283,[.53,.59,.64]);
+  cube(mesh,0,.32,0,.316,.065,.302,leather);
+  for(const side of [-1,1]){
+   cube(mesh,.01,.028,side*.071,.132,.19,.104,leather);
+   if(detail===2){
+    cube(mesh,.068,.020,side*.071,.148,.059,.109,[.31,.22,.15]);
+    timberBeam(mesh,[-.01,.58,side*.137],[.137,.425,side*.164],.086,tint(coat,.89));
    }
   }
-  if(medium&&march.troops>=100){
-   const wagon=armyPathSample(march,travel-Math.ceil(count/4)*.65-1);
-   const y=wagon.y+1.1;
-   cube(out,wagon.x,y+.35,wagon.z,1.15,.35,.7,[.39,.29,.19]);
-   cube(out,wagon.x,y+.7,wagon.z,.85,.5,.62,[.70,.61,.43]);
-   if(close) for(const direction of [-1,1]) wheel(out,wagon.x+direction*.35,y+.28,wagon.z-.38,.22,phase);
+  const cx=.168,cy=.488,cz=.10;
+  const rim=[[.175,-.123],[.175,.123],[-.036,.113],[-.18,0],[-.036,-.113]];
+  const boss=[cx+.042,cy,cz];
+  for(let i=0;i<rim.length;i++){
+   const a=rim[i],b=rim[(i+1)%rim.length];
+   const from=[cx,cy+a[0],cz+a[1]],to=[cx,cy+b[0],cz+b[1]];
+   const innerA=[cx+.013,cy+a[0]*.87,cz+a[1]*.86],innerB=[cx+.013,cy+b[0]*.87,cz+b[1]*.86];
+   quad(mesh,from,to,innerB,innerA,[.39,.27,.14]);
+   tri(mesh,innerA,innerB,boss,tint([.86,.61,.28],i<2?1.06:.89));
   }
-  const [dx,dz]=[Math.cos(lead.angle),Math.sin(lead.angle)];
-  const x=lead.x-dz*.73,z=lead.z+dx*.73,y=lead.y+2.11;
-  const mast=[x,y+1.95,z],hang=[x,y+1.58,z];
-  timberBeam(out,[x,y-.39,z],mast,.07,[.39,.29,.20]);
-  const tip=[x-dx*.87,y+1.43+Math.sin(phase)*.065,z-dz*.87];
-  tri(out,mast,hang,tip,color);
-  tri(out,hang,[x,y+1.13,z],tip,tint(color,.78));
-
+  if(detail===2)cube(mesh,cx+.034,cy-.028,cz,.041,.057,.058,[.68,.67,.54]);
+ }
+ models[detail]=mesh;
+ return mesh;
+}
+function drawMarches(){
+ const visible=[],transports=[],out=[];
+ const close=cam.scale>=.011,medium=cam.scale>=.006;
+ for(const march of state.armyMoves||[]){
+  const elapsed=armyMarchElapsed(march,simClock),travel=routeDistanceAt(march.path,elapsed/march.duration);
+  const lead=armyPathSample(march,travel);
+  armyPaintHeading.set(march,lead.angle);
+  if(march.path.landingId!=null&&travel>=march.path.seaStart&&travel<=march.path.seaEnd){
+   if(inMapViewport(lead.x,lead.z,4)&&navigableWater(lead))transports.push({...lead,color:FACTION_COLORS[march.owner]||FACTION_COLORS.you});
+   continue;
+  }
+  if(!march.inBattle&&inMapViewport(lead.x,lead.z,lead.y,170))visible.push({march,travel,lead,elapsed});
+ }
+ for(const march of state.fieldArmies||[]){
+  if(!march.generalSlot||march.inBattle||march.troops<=0||!march.location?.point)continue;
+  const {x,z}=march.location.point,y=roadGround(x,z);
+  if(inMapViewport(x,z,y,120))visible.push({march,lead:{x,y,z,angle:armyPaintHeading.get(march)??-.76},elapsed:0});
+ }
+ if(!visible.length&&!transports.length)return;
+ for(const {x,z,angle,color} of transports)placeShip(out,shipModel(color,false,medium),x,-1.15,z,angle);
+ const allotment=Math.min(close?104:medium?42:12,Math.max(4,Math.floor((close?184:medium?152:112)/visible.length)));
+ for(const {march,travel,lead,elapsed} of visible){
+  const color=vassalById(state,march.vassalId,march.owner)?.color||FACTION_COLORS[march.owner]||FACTION_COLORS.you;
+  const mesh=infantryModel(color,close?2:medium?1:0),count=Math.min(allotment,march.troops);
+  const phase=elapsed*6,walking=travel!=null&&!march.waiting&&!motionReduced();
+  for(let i=0;i<count;i++){
+   const back=Math.floor(i/4)*.62,side=(i%4-1.5)*.37;
+   const distanceAt=travel==null?0:travel-back;
+   const p=travel==null?lead:armyPathSample(march,distanceAt);
+   const behind=travel==null?back:Math.max(0,-distanceAt);
+   const x=p.x-Math.cos(p.angle)*behind-Math.sin(p.angle)*side;
+   const z=p.z-Math.sin(p.angle)*behind+Math.cos(p.angle)*side;
+   const ground=behind>0?roadGround(x,z):p.y;
+   const cadence=phase+i*.71,bob=walking?Math.sin(cadence)*.039:0;
+   appendPaintedModel(out,mesh,x,ground+.38+bob,z,p.angle+(walking?Math.sin(cadence)*.034:0));
+   if(medium)addActorShadow(x+.085,z+.065,.26,.189,ground);
+   if(close&&i%9===0)timberBeam(out,[x,ground+.9,z],[x,ground+1.80,z-.08],.027,[.43,.34,.22]);
+  }
+  const dx=Math.cos(lead.angle),dz=Math.sin(lead.angle);
+  const x=lead.x-dz*.68,z=lead.z+dx*.68,y=lead.y+1.12;
+  const top=[x,y+1.80,z],tip=[x-dx*.91,y+1.39+Math.sin(phase)*.06,z-dz*.91];
+  timberBeam(out,[x,y-.62,z],top,.065,[.39,.29,.20]);
+  const lower=[x,y+1.06,z],fold=[x-dx*.44-dz*.07,y+1.38,z-dz*.44+dx*.07];
+  tri(out,top,tip,fold,tint(color,1.15));
+  tri(out,top,fold,lower,color);
+  tri(out,fold,tip,lower,tint(color,.78));
  }
  if(!marchBuffer) marchBuffer={buffer:gl.createBuffer(),count:0};
  gl.bindBuffer(gl.ARRAY_BUFFER,marchBuffer.buffer);
  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(out),gl.DYNAMIC_DRAW);
- marchBuffer.count=out.length/6;
- drawBuffer(marchBuffer);
+ marchBuffer.count=out.length/6;drawBuffer(marchBuffer);
 }
 let battleBuffer=null;
 function drawBattles(now){
@@ -3324,13 +3454,10 @@ function drawBattles(now){
     const advance=Math.sin(phase+i*.77)*.20;
     const x=p.x+side*(1.35+(i%3)*.36-advance),z=p.z+(Math.floor(i/3)-2.3)*.41;
     const y=ground+Math.abs(Math.sin(phase+i))*.10;
-    cube(out,x,y+.36,z,.22,.62,.22,tint(color,.94+(i%3)*.065));
-    if(detail){
-     cube(out,x,y+.79,z,.17,.20,.17,[.74,.64,.50]);
-     cone(out,x,y+.94,z,.118,.12,[.43,.48,.48],6);
-     const weapon=[x-side*(.40+advance*.66),y+.84+advance,z+.12];
-     timberBeam(out,[x-side*.10,y+.61,z],weapon,.047,[.68,.68,.56]);
-    }
+    const mesh=infantryModel(color,detail?2:0),angle=side===1?Math.PI:0;
+    appendPaintedModel(out,mesh,x,y-.62,z,angle);
+    if(detail)addActorShadow(x+.09,z+.06,.28,.21,ground-1);
+    if(detail&&i%6===0)timberBeam(out,[x,y+.10,z],[x-side*.31,y+.66+advance,z],.03,[.58,.61,.61]);
    }
    const x=p.x+side*2.42,z=p.z+.62,y=ground+.5;
    timberBeam(out,[x,y,z],[x,y+1.7,z],.075,[.32,.27,.19]);
@@ -3515,7 +3642,9 @@ function renderArmySelection(byKey){
   const row=document.createElement('li'),button=document.createElement('button');
   button.type='button';button.className='army-selection-row';
   const icon=document.createElement('span'),name=document.createElement('span'),count=document.createElement('b');
-  icon.className='army-selection-icon';icon.setAttribute('aria-hidden','true');icon.textContent=item.icon;
+  icon.className='army-selection-icon';icon.setAttribute('aria-hidden','true');
+  if(item.general)icon.innerHTML=generalArmySwords;
+  else icon.textContent=item.icon;
   name.textContent=item.label;count.textContent=toNumber(item.troops);
   button.append(icon,name,count);button.onclick=()=>{
    const point=marchElements.get(item.key)?.armyItem.point;
@@ -3534,6 +3663,7 @@ $('army-selection-close').onclick=()=>{
  renderMarches();renderCargo();
 };
 const armyBadgeShield='<span class="army-unit-emblem" aria-hidden="true"><svg viewBox="0 0 24 27"><path d="M2 2h20v12c0 5-5 9-10 11C7 23 2 19 2 14Z" fill="currentColor" fill-opacity=".2" stroke="currentColor"/><path d="M7 7l11 11m-11 0L18 7m-5 11 4-4M6 14l4 4" stroke="currentColor" stroke-width="1.5"/></svg></span>';
+const generalArmySwords='<svg class="general-army-swords" viewBox="0 0 32 32" aria-hidden="true"><use href="#ui-general-swords"/></svg>';
 function renderMarches(){
  const layer=$('army-layer'),items=[];
  for(const region of state.regions){
@@ -3556,9 +3686,13 @@ function renderMarches(){
  }
  const byKey=new Map(items.map(item=>[item.key,item])),stacks=new Map();
  for(const item of items){
+  item.count=item.troops.toLocaleString(interfaceLocale);
+  item.general=item.key.generalSlot!=null&&item.key.vassalId==null;
   const point=item.point,key=Math.round(point.x)+':'+Math.round(point.z);
-  if(!stacks.has(key))stacks.set(key,[]);
-  item.stack=stacks.get(key);item.stack.push(item);
+  if(!stacks.has(key))stacks.set(key,{size:0,spacing:65});
+  const stack=stacks.get(key);
+  item.stack=stack;item.stackIndex=stack.size++;
+  if(item.general)stack.spacing=Math.max(stack.spacing,48+item.count.length*10);
  }
  const canSelect=selection=>{const item=byKey.get(armySelectionKey(selection));return item?.owner==='you'&&!item.house};
  if(selectedArmy&&!canSelect(selectedArmy))selectedArmy=null;
@@ -3568,7 +3702,7 @@ function renderMarches(){
   if(!byKey.has(key)){element.remove();marchElements.delete(key)}
  }
  for(const item of items){
-  const {point,key}=item;
+  const {point,key,count,general,stack,stackIndex}=item;
   const screen=project(point.x,point.z,roadGround(point.x,point.z)+6);
   item.position={...screen};
   const nearSeat=state.regions.find(r=>r.slots?.[0]&&Math.hypot(r.slots[0].x-point.x,r.slots[0].z-point.z)<=18);
@@ -3576,24 +3710,27 @@ function renderMarches(){
    const seat=nearSeat.slots[0],label=project(seat.x,seat.z,roadGround(seat.x,seat.z));
    if(Math.hypot(screen.x-label.x,screen.y-label.y)<34){screen.x=label.x;screen.y=label.y+24}
   }
-  screen.x+=(item.stack.indexOf(item)-(item.stack.length-1)*.5)*65;
+  screen.x+=(stackIndex-(stack.size-1)*.5)*stack.spacing;
   item.badge=screen;
   let element=marchElements.get(key);
   if(!element){
    element=document.createElement('button');
    element.type='button';
-   element.innerHTML=armyBadgeShield+'<span class="army-unit-values"><small></small><b></b></span>';
+   element.innerHTML=general?generalArmySwords+'<b></b>':armyBadgeShield+'<span class="army-unit-values"><small></small><b></b></span>';
    element.addEventListener('pointerdown',event=>event.stopPropagation());
    element.addEventListener('click',event=>{event.stopPropagation();clickArmyBadge(element.armyItem,event)});
    layer.appendChild(element);marchElements.set(key,element);
   }
   element.armyItem=item;
-  element.className='march-badge'+(selectedKeys.has(key)?' selected':'')+(key.inBattle?' fighting':'');
+  element.className='march-badge'+(general?' general-army-badge':'')+(general&&item.owner!=='you'?' foreign-army':'')+
+   (selectedKeys.has(key)?' selected':'')+(key.inBattle?' fighting':'');
   colorUnitMarker(element,item.owner,item.house);
-  const commander=element.querySelector('small'),headcount=element.querySelector('b');
+  const headcount=element.querySelector('b');
   const name=item.house?'Феодал':key.generalSlot?generalName(key.generalSlot):item.icon;
-  if(commander.textContent!==name)commander.textContent=name;
-  const count=item.troops.toLocaleString(interfaceLocale);
+  if(!general){
+   const commander=element.querySelector('small');
+   if(commander.textContent!==name)commander.textContent=name;
+  }
   if(headcount.textContent!==count)headcount.textContent=count;
   const title=name+' · '+(key.inBattle?'Идёт бой':item.label)+' · '+item.troops+' солдат'+(item.house?' · '+vassalDisplayName(state,item.house)+(key.vassalOrder?' · '+key.vassalOrder:''):item.owner==='you'?' · нажмите, чтобы выбрать':'');
   if(element.title!==title){element.title=title;element.setAttribute('aria-label',title)}
@@ -3780,7 +3917,7 @@ function renderCargo(){const layer=$('cargo-layer'),shipments=visibleCargoBadges
 }selectedWarship=null;selectedCargo=ship;selectedCargoGroup=[];selectedArmy=null;selectedGroup=[];$('placement').hidden=true;$('object-title').textContent='ВЫБРАННЫЙ ОБОЗ';$('cargo-inspector').hidden=false;$('cargo-info').textContent=cargoDescription(ship);renderMarches()});layer.appendChild(el);cargoElements.set(ship,el)}el.className='cargo-badge cargo-'+ship.good+(ship.kind==='petition'?' cargo-petition':'')+(ship.kind==='loot'?' cargo-loot':'')+(['export','tradeReturn','botSeaTrade'].includes(ship.kind)?' cargo-trade':'')+(ship===selectedCargo||selectedCargoGroup.includes(ship)?' selected':'');colorUnitMarker(el,shipmentOwner(ship));let desc=cargoDescription(ship);if(el.dataset.desc!==desc){el.dataset.desc=desc;el.setAttribute('aria-label',desc);el.innerHTML='<span>'+(ship.kind==='petitionReturn'?'↩':ship.kind==='petition'?'♛':ship.kind==='loot'?'⚔':ship.kind==='tradeReturn'?'↩':ship.kind==='botSeaTrade'?(ship.mode==='sea'?'⚓':'♞'):ship.kind==='export'?(ship.mode==='sea'?'⚓':'♞'):(ship.seaSupply?'⚓':resourceGlyph(ship.good)))+'</span>'+
    (ship.kind==='supply'&&ship.amount>=6?'<small class="cargo-count">'+ship.amount+'</small>':'')+'<span class="cargo-tip">'+desc+'</span>'}el.style.left=screen.x+'px';el.style.top=screen.y+'px'}}
 const feedbackPalette={grain:[.77,.64,.37],wood:[.61,.43,.24],iron:[.61,.64,.66],cloth:[.73,.49,.48],equipment:[.73,.57,.31]};
-const gameAudio=createGameAudio($('feedback-sound'));
+const gameAudio=globalThis.gameAudio;
 const playFeedbackSound=gameAudio.play,playSelectionSound=gameAudio.select;
 const mapFeedback=new Map(),captureWaves=new Map();
 let producerLoads=new WeakMap(),loadedConvoys=new WeakSet(),deliveryBatch=null;
@@ -4030,8 +4167,8 @@ function updateResources(){
   explainAction(item,name,item.title);
  }
  const fleet=tradeFleet(state),fleetEl=$('trade-fleet');
- fleetEl.innerHTML='<small>ТОРГОВЫЙ ТРАНСПОРТ</small><b>Обозы '+fleet.landUsed+'/'+fleet.land+' · корабли '+fleet.seaUsed+'/'+fleet.sea+'</b>';
- fleetEl.title='Занято / всего. Уровень столицы даёт сухопутные караваны, каждый порт даёт один торговый корабль. Транспорт освобождается после возвращения.';
+ fleetEl.innerHTML='<svg class="ui-glyph" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-cart"/></svg><span class="metric-values"><small>ТОРГОВЫЙ ТРАНСПОРТ</small><b>'+fleet.landUsed+'/'+fleet.land+' · '+fleet.seaUsed+'/'+fleet.sea+'</b></span>';
+ fleetEl.title='Обозы '+fleet.landUsed+'/'+fleet.land+' · корабли '+fleet.seaUsed+'/'+fleet.sea+'. Занято / всего. Уровень столицы даёт сухопутные караваны, каждый порт даёт один торговый корабль. Транспорт освобождается после возвращения.';
  const p=$('population'),housing=housingTotal(state).toLocaleString(interfaceLocale),growth=(e.actualGrowthRate??.01)*100;
  const prefix=e.hungry?(growth<0?'ГОЛОД':'НЕХВАТКА'):e.housingFull?'НЕТ ЖИЛЬЯ':e.housingLimited?'ЖИЛЬЁ':growth<0?'УБЫЛЬ':'РОСТ';
  p.innerHTML='<span class="resource-icon" aria-hidden="true">'+resourceGlyph('population')+'</span><span class="resource-values"><span class="resource-name">НАСЕЛЕНИЕ</span><b>'+
@@ -4076,14 +4213,16 @@ if(gpuAdapterLine)console.info('GPU: '+gpuAdapterLine);
 let lowFpsStreak=0,fpsWarned=false;
 const fpsWatchdog=fps=>{
  if(!state.started||globalThis.gameShell?.paused)return;
- if(fps<30){if(++lowFpsStreak>=12&&!fpsWarned){fpsWarned=true;gameSettings.update?.({fpsCounter:true});flash('Низкая частота кадров: '+fps+' FPS'+(gpuAdapterLine?' · '+gpuAdapterLine:'')+'. Шестерёнка справа внизу → выключите сглаживание и уменьшите масштаб рендера.')}}
+ if(fps<29){if(++lowFpsStreak>=12&&!fpsWarned){fpsWarned=true;flash('Низкая частота кадров: '+fps+' FPS'+(gpuAdapterLine?' · '+gpuAdapterLine:'')+'. В настройках графики можно выключить сглаживание или уменьшить масштаб рендера.')}}
  else lowFpsStreak=0;
 };
-const gameSettings=globalThis.BALTIC_SETTINGS??{current:{renderScale:1},onChange(){}};
-let fpsFrames=0,fpsSampleAt=0,fpsMeter=$('fps-meter'),cachedScale=gameSettings.current.renderScale??1;
+const gameSettings=globalThis.BALTIC_SETTINGS;
+let preferences=gameSettings.current,nextFrameAt=0;
+let fpsFrames=0,fpsSampleAt=0,fpsMeter=$('fps-meter'),cachedScale=preferences.renderScale;
 gameSettings.onChange(settings=>{
  // Масштаб рендера подхватится в resize() на следующем кадре.
- cachedScale=settings.renderScale??1;
+ cachedScale=settings.renderScale;
+ preferences=settings;nextFrameAt=0;
  const msaa=settings.msaa===false?1:4;
  if(gl.setSampleCount&&msaa!==gl.sampleCount)gl.setSampleCount(msaa);
 });
@@ -4093,7 +4232,12 @@ gameSettings.onChange(settings=>{
 const simTimings={economy:0,surfaces:0,traffic:0,effects:0,ui:0,count:0,worstEconomy:0,worstSurfaces:0,worstTraffic:0,worstEffects:0,worstUi:0};
 globalThis.__simTimings=simTimings;
 function draw(now=0){
- fpsFrames++;const fpsNow=performance.now();if(fpsNow-fpsSampleAt>=500){const fps=Math.round(fpsFrames*1000/(fpsNow-fpsSampleAt||1));fpsFrames=0;fpsSampleAt=fpsNow;if(fpsMeter){fpsMeter.textContent=fps+' FPS';fpsMeter.dataset.rate=fps<30?'low':fps<55?'mid':'ok';fpsMeter.hidden=!gameSettings.current.fpsCounter}fpsWatchdog(fps)}
+ if(preferences.fpsLimit){
+  if(now+.5<nextFrameAt){requestAnimationFrame(draw);return;}
+  const interval=1000/preferences.fpsLimit;
+  nextFrameAt=!nextFrameAt||now-nextFrameAt>=interval?now+interval:nextFrameAt+interval;
+ }
+ fpsFrames++;const fpsNow=performance.now();if(fpsNow-fpsSampleAt>=500){const fps=Math.round(fpsFrames*1000/(fpsNow-fpsSampleAt||1));fpsFrames=0;fpsSampleAt=fpsNow;if(fpsMeter){fpsMeter.textContent=fps+' FPS';fpsMeter.dataset.rate=fps<30?'low':fps<55?'mid':'ok';fpsMeter.hidden=!preferences.fpsCounter}fpsWatchdog(fps)}
  if(globalThis.gameShell?.paused){lastFrame=now;requestAnimationFrame(draw);return}
  if(recapPlayback){drawCampaignReplay(now);requestAnimationFrame(draw);return}
  runVisualJobs();
@@ -4102,11 +4246,12 @@ function draw(now=0){
  gl.activeTexture(gl.TEXTURE0+14);gl.bindTexture(gl.TEXTURE_2D,habitatAsset.texture);
  gl.activeTexture(gl.TEXTURE0+13);gl.bindTexture(gl.TEXTURE_2D,parcelAnchorTexture);
  gl.activeTexture(gl.TEXTURE0+15);gl.bindTexture(gl.TEXTURE_2D,canopyShadowTexture);
+ gl.activeTexture(gl.TEXTURE0+16);gl.bindTexture(gl.TEXTURE_2D,meadowBrushAsset.texture);
  gl.uniform1f(loc.andalusiaReady,andalusiaAsset?.ready?1:0);
  gl.activeTexture(gl.TEXTURE0+2);gl.bindTexture(gl.TEXTURE_2D,closeGroundAsset.texture);
  if(urbanPaint){gl.activeTexture(gl.TEXTURE0+11);gl.bindTexture(gl.TEXTURE_2D,urbanPaint.texture)}
  if(andalusiaAsset){gl.activeTexture(gl.TEXTURE0+3);gl.bindTexture(gl.TEXTURE_2D,andalusiaAsset.texture)}
- gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,materialsAsset.texture);gl.uniform1i(loc.materialMap,4);gl.uniform1f(loc.materialsReady,materialsAsset.ready?(closeGroundAsset.ready?(paintedMaterials.ready&&habitatAsset.ready?3:2):1):0);
+ gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,materialsAsset.texture);gl.uniform1i(loc.materialMap,4);gl.uniform1f(loc.materialsReady,materialsAsset.ready?(closeGroundAsset.ready?(paintedMaterials.ready&&habitatAsset.ready&&meadowBrushAsset.ready?3:2):1):0);
  gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(.0065-cam.scale*WORLD_SCALE)/.004)),hasStencil=gl.getContextAttributes?.()?.stencil!==false;gl.uniform1f(loc.terrainDetail,-1);drawBuffer(basemap.table);gl.uniform1f(loc.terrainDetail,1);
  if(hasStencil){gl.clearStencil(0);gl.stencilMask(255);gl.clear(gl.STENCIL_BUFFER_BIT);gl.enable(gl.STENCIL_TEST);gl.stencilFunc(gl.ALWAYS,1,255);gl.stencilOp(gl.KEEP,gl.KEEP,gl.REPLACE)}else{drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1)}
  gl.activeTexture(gl.TEXTURE0+6);gl.bindTexture(gl.TEXTURE_2D,parcelIndexAsset.texture);gl.uniform1i(loc.parcelIndex,6);gl.activeTexture(gl.TEXTURE0+7);gl.bindTexture(gl.TEXTURE_2D,parcelStyleTexture);gl.uniform1i(loc.parcelStyle,7);gl.uniform2f(loc.parcelIndexSize,parcelIndexAsset.width,parcelIndexAsset.height);gl.uniform1f(loc.parcelIndexReady,parcelIndexAsset.ready?1:0);gl.uniform1f(loc.showPlotBorders,mode?1:0);
@@ -4119,7 +4264,7 @@ function draw(now=0){
   if(hasWave)gl.uniform1f(loc.captureStrength,0);
  }gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.paintPlots,0);
  if(hasStencil){gl.stencilMask(0);gl.stencilFunc(gl.EQUAL,0,255);drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.disable(gl.STENCIL_TEST);gl.stencilMask(255)}
- gl.uniform1f(loc.terrainDetail,0);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.uniform1f(loc.roadDetail,0);drawSelectedRoute();drawBorders(now);drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer);drawMeshBatch(buildingsBuffer);drawFortifications();drawWorkshopActivity(now);drawCarts();drawFleet();drawMarches();drawBattles(now);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw)}
+ gl.uniform1f(loc.terrainDetail,0);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);gl.enable(gl.BLEND);gl.depthMask(false);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.depthMask(true);gl.disable(gl.BLEND);gl.uniform1f(loc.roadDetail,0);drawSelectedRoute();drawBorders(now);if(preferences.trees)drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer);drawMeshBatch(buildingsBuffer);drawFortifications();drawWorkshopActivity(now);actorShadowVertices.length=0;drawCarts();drawFleet();drawMarches();drawBattles(now);if(actorShadowVertices.length)drawForest(true);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw)}
 function flash(msg){const t=$('toast');t.textContent=msg;t.classList.add('visible');clearTimeout(flash.t);flash.t=setTimeout(()=>t.classList.remove('visible'),2600)}
 function setSelected(region,tab){
  if(state.selected!==region)hideActionExplanation();
@@ -4249,6 +4394,7 @@ function start(r,preset=null,match=null){
  }
  initializeCampaign(state,GAME_MAP?'mediterranean':'baltic');
  state.onCampaignPact=onCampaignPact;
+ state.rankBotExpansion=owner=>rankBotExpansion(state,owner);
  state.onCampaignEnd=onCampaignEnd;
  state.onCampaignCountdown=onCampaignCountdown;
  if(preset)applyCampaignStart(r,preset);
@@ -5039,15 +5185,26 @@ function recruitBot(id){let f=state.factions?.[id];if(!f)return;let signal=strat
 // Bots make imperfect, resource-bound military decisions using existing armies.
 // Responses use existing ports, real stock and paid garrisons.
 function respondCampaignPressure(id){
- const c=state.campaign,threat=c?.pressure,f=state.factions[id];
- if(!threat||threat.owner===id||campaignAllies(state,id).includes(threat.owner))return;
- if((f.nextCampaignResponse||0)>state.economy.seconds)return;
- f.nextCampaignResponse=state.economy.seconds+12;
+ const c=state.campaign,f=state.factions[id],now=state.economy.seconds;
+ if(!c||c.result||!f||(f.nextCampaignResponse||0)>now)return;
+ f.nextCampaignResponse=now+12;
+ const frontiers=campaignFrontiers(state),rival=regionalBotRival(state,id,frontiers);
+ const trade=c.progress.get(rival)?.trade;
+ const contender=trade?.eligible&&trade.remaining<=90&&trade.buyers.includes(id)&&!isAtWar(state,id,rival)&&
+  !campaignEmbargoStatus(state,id,rival).cooldown&&now>=(c.counterEmbargoes.get(rival)??0)?rival:null;
+ if(contender&&setCampaignEmbargo(state,id,contender)?.active){
+  c.counterEmbargoes.set(contender,now+EMBARGO_COOLDOWN);
+  if(contender==='you')addNotice('economy','Соперник ввёл эмбарго',countryName(id)+' закрыл взаимную торговлю на '+campaignTime(EMBARGO_DURATION)+'.',f.regionId);
+  updateCampaign(state,0);
+ }
+ const threat=c.pressure?.owner===rival?c.pressure:null;
+ if(f.commerceTarget!==rival)f.commerceTarget=null;
+ if(!threat)return;
  const owned=state.regions.filter(r=>r.owner===id);
  const frontrunner=state.regions.filter(r=>r.owner===threat.owner);
  if(threat.path==='trade'&&!isAtWar(state,id,threat.owner)){
   const markets=c.progress.get(threat.owner)?.trade.buyers||[];
-  const nearMarkets=markets.filter(market=>market!==id&&!isAtWar(state,id,market));
+  const nearMarkets=markets.filter(market=>frontiers.get(id)?.has(market)&&market!==threat.owner&&!isAtWar(state,id,market));
   if(nearMarkets.length){
    f.commerceTarget=threat.owner;
    if(!f.warnedCompetition&&threat.owner==='you'){
@@ -5057,7 +5214,7 @@ function respondCampaignPressure(id){
   }
  }
  if(threat.path!=='military')return;
- const frontier=owned.filter(r=>militaryCampaignTarget(state,r)||frontrunner.some(o=>o.adj.includes(r.id)||r.adj.includes(o.id)));
+ const frontier=owned.filter(r=>frontrunner.some(o=>o.adj.includes(r.id)||r.adj.includes(o.id)));
  if(!frontier.length)return;
  const target=frontier.sort((a,b)=>Number(militaryCampaignTarget(state,b))-Number(militaryCampaignTarget(state,a)))[0];
  const waiting=(state.recruitments||[]).filter(order=>order.owner===id&&order.vassalId==null).reduce((sum,order)=>sum+order.troops,0);
@@ -5065,47 +5222,30 @@ function respondCampaignPressure(id){
     f.gold>=RECRUIT_GOLD+35&&recruitGarrison(state,target,id).ok&&threat.owner==='you'){
   addNotice('war','Соперник пополняет армию',target.city+' собирает подкрепление для генерала.',target.id);
  }
- if(campaignAllies(state,id).length>=2)return;
- const neighbor=state.regions.find(r=>{
-  const partner=r.owner;
-  return partner!=='you'&&partner!==id&&partner!==threat.owner&&campaignNationAlive(state,partner)&&
-   adjacentToFaction(state,r,id)&&campaignAllies(state,partner).length<2&&
-   !campaignAllies(state,partner).includes(threat.owner)&&campaignAllianceCheck(state,id,partner,threat.owner).ok;
- });
- if(neighbor)formCampaignAlliance(state,id,neighbor.owner,threat.owner);
 }
 
-function chooseBotWarTarget(id){
+function chooseBotWarTarget(id,rival=regionalBotRival(state,id)){
  const f=state.factions?.[id],now=state.economy?.seconds||0;
- if(!f||f.defeated||f.isRebel||now<240||f.gold<65||activeWarEnemies(state,id).length)return null;
+ if(!f||!rival||f.defeated||f.isRebel||now<240||f.gold<65||activeWarEnemies(state,id).length)return null;
  const strength=armyTroops(state,id);
  if(strength<100)return null;
  // Free land first: while unclaimed duchies remain within reach, rivals keep
  // expanding peacefully instead of fighting when everyone has room.
- const landFree=state.regions.some(r=>r.owner==='neutral'&&adjacentToFaction(state,r,id));
- const seaFree=state.seaPetitionPath&&state.regions.some(r=>r.owner===id&&r.buildings.some(b=>b.type==='port'))&&
-  state.regions.some(r=>r.owner==='neutral'&&r.coast);
- if(landFree||seaFree)return null;
+ const coalitionPartner=campaignAllies(state,id).find(ally=>state.campaign?.pacts.get(warKey(id,ally))?.against===rival&&isAtWar(state,ally,rival));
+ if(!coalitionPartner&&rankBotExpansion(state,id).some(candidate=>candidate.byLand))return null;
  const owned=state.regions.filter(r=>r.owner===id),byId=new Map(state.regions.map(r=>[r.id,r]));
- const allies=new Set(campaignAllies(state,id)),fronts=new Map();
- function addFront(source,target,contested){
+ const fronts=new Map();
+ function addFront(source,target){
   const opponent=target?.owner;
-  if(!opponent||opponent===id||opponent==='neutral'||allies.has(opponent)||
-     !campaignNationAlive(state,opponent)||state.factions[opponent]?.isRebel||
-     state.transit?.[id+'>'+opponent]||state.transit?.[opponent+'>'+id])return;
-  if(truceDays(state,id,opponent)||contested&&opponent==='you')return;
+  if(opponent!==rival||state.transit?.[id+'>'+opponent]||state.transit?.[opponent+'>'+id]||truceDays(state,id,opponent))return;
   const defenders=state.garrisons?.[target.id]?.troops||0;
   const advance=militaryCampaignTarget(state,target)?38:0;
-  const score=100+advance-defenders*.25-(contested?35:0)-distance(source.slots[0],target.slots[0])*.25;
+  const score=100+advance-defenders*.25-distance(source.slots[0],target.slots[0])*.25;
   if(!fronts.has(opponent)||fronts.get(opponent).score<score)fronts.set(opponent,{source,target,score});
  }
  for(const source of owned){
   for(const id of source.adj||[]){
-   const neighbor=byId.get(id);
-   addFront(source,neighbor,false);
-   if(now>=275&&neighbor?.owner==='neutral'){
-    for(const other of neighbor.adj||[])addFront(source,byId.get(other),true);
-   }
+   addFront(source,byId.get(id));
   }
  }
  for(const [opponent,front] of [...fronts].sort((a,b)=>b[1].score-a[1].score)){
@@ -5118,7 +5258,8 @@ function chooseBotWarTarget(id){
   }
   const caution=1+(72-warReadiness(state,id))*.007;
   const minimum=opponent==='you'?Math.max(200,opposing*1.35*caution):Math.max(100,opposing*.84*caution);
-  if(strength<minimum||activeWarEnemies(state,opponent).length>=2)continue;
+  const support=coalitionPartner?armyTroops(state,coalitionPartner)*.55:0;
+  if(strength+support<minimum||activeWarEnemies(state,opponent).length>=2)continue;
   const roads=armyEdgeFilter(state,id,null,opponent),graph=state.network;
   const from=graph?.hubKeys.get(front.source.id),to=graph?.hubKeys.get(front.target.id);
   if(from&&to&&networkPath(graph,from,to,roads))return opponent;
@@ -5128,8 +5269,7 @@ function chooseBotWarTarget(id){
  const ports=owned.filter(r=>r.buildings.some(b=>b.type==='port'));
  const armies=state.fieldArmies.filter(unit=>unit.owner===id&&unit.vassalId==null&&unit.troops>=100&&!unit.inBattle);
  if(!ports.length||!armies.length)return null;
- const coasts=state.regions.filter(r=>r.coast&&r.owner!=='you'&&r.owner!==id&&r.owner!=='neutral'&&
-  !allies.has(r.owner)&&campaignNationAlive(state,r.owner)&&!state.factions[r.owner]?.isRebel&&
+ const coasts=state.regions.filter(r=>r.coast&&r.owner===rival&&rival!=='you'&&adjacentToFaction(state,r,id)&&
   (r.buildings.some(b=>b.type==='port')||militaryCampaignTarget(state,r)));
  const lanes=[];
  for(const port of ports)for(const target of coasts){
@@ -5172,10 +5312,12 @@ function planBotCouncil(owner){
  if(!(enemies.size&&duchyStability(weakest,guards.get(weakest.id))>=65&&militaryBudget>=marshalMarketPrice(MARSHAL_RECRUIT_STEP).total&&
     faction.gold>=120&&recruitSiteCheck(state,front,owner,MARSHAL_RECRUIT_STEP).ok&&assign('marshal',front,'recruit',militaryBudget)))
   assign('marshal',weakest,'stabilize');
- const diplomacy=state.regions.filter(r=>r.id===realmCapitalId(state,r.owner)&&
-  !campaignAllies(state,owner).includes(r.owner)&&councilTargetAllowed(state,'chancellor',r,'relations',owner))
-  .sort((a,b)=>campaignRelation(state,b.owner,owner).trust-campaignRelation(state,a.owner,owner).trust);
- const neighbor=diplomacy.find(r=>campaignRelation(state,r.owner,owner).trust<ALLIANCE_TRUST);
+ const frontiers=campaignFrontiers(state),rival=regionalBotRival(state,owner,frontiers);
+ const regionalPartners=[...(frontiers.get(owner)||[])].filter(partner=>partner!=='you'&&rival&&
+  campaignAllianceCheck(state,owner,partner,rival,frontiers).ok);
+ const diplomaticTarget=regionalPartners.sort((a,b)=>campaignRelation(state,b,owner).trust-campaignRelation(state,a,owner).trust)[0]||rival;
+ const neighbor=state.regions.find(r=>r.owner===diplomaticTarget&&r.id===realmCapitalId(state,r.owner)&&
+  campaignRelation(state,r.owner,owner).trust<ALLIANCE_TRUST&&councilTargetAllowed(state,'chancellor',r,'relations',owner));
  if(neighbor){
   const trust=campaignRelation(state,neighbor.owner,owner).trust;
   if(!(trust>=30&&!campaignEmbassy(state,neighbor.owner,owner)&&assign('chancellor',neighbor,'embassy')))
@@ -5207,18 +5349,31 @@ function planBotCouncil(owner){
    addNotice('diplomacy','Оплачен проход войск',countryName(owner)+' · '+TRANSIT_COST+' зл.',corridor.id);
  }
 }
+function planRegionalBotPact(id,rival,frontiers){
+ if(!rival||!state.campaign||state.economy.seconds<120)return;
+ const power=factionPower(state,rival).total,mine=factionPower(state,id).total;
+ const candidates=[];
+ for(const partner of frontiers.get(id)||[]){
+  if(partner==='you'||!campaignAllianceCheck(state,id,partner,rival,frontiers).ok)continue;
+  const trust=campaignRelation(state,partner,id).trust;
+  const threatened=isAtWar(state,rival,id)||isAtWar(state,rival,partner);
+  if(!threatened&&(trust<24||power<Math.max(mine,factionPower(state,partner).total)*.92))continue;
+  candidates.push({partner,score:trust+(isAtWar(state,rival,partner)?30:0)});
+ }
+ candidates.sort((a,b)=>b.score-a.score||a.partner.localeCompare(b.partner));
+ if(candidates.length)formCampaignAlliance(state,id,candidates[0].partner,rival);
+}
 function planBotDiplomacy(id){
  if(planBotPeace(id))return;
  respondCampaignPressure(id);
- if(state.campaign&&campaignAllies(state,id).length<state.campaign.rules.allies){
-  const partner=Object.keys(state.factions).find(other=>campaignAllianceCheck(state,id,other).ok);
-  if(partner)formCampaignAlliance(state,id,partner);
- }
+ const frontiers=campaignFrontiers(state),rival=regionalBotRival(state,id,frontiers);
+ planRegionalBotPact(id,rival,frontiers);
  const faction=state.factions[id];
+ faction.regionalRival=rival;
  if(faction.gold>=HARBOR_CHARTER_COST+100&&!tradeFleet(state,id).sea){
   for(const ally of campaignAllies(state,id))if(acceptHarborCharter(ally,id))break;
  }
- const opponent=chooseBotWarTarget(id);
+ const opponent=chooseBotWarTarget(id,rival);
  if(opponent)declareWar(state,opponent,id);
 }
 function planBotPeace(owner){
@@ -5270,15 +5425,21 @@ function planBotWar(id){let f=state.factions?.[id];if(!f||f.defeated||!state.net
  let threats=regions.map(r=>{let hostiles=foes.filter(a=>!a.garrison&&distance(a.point,r.slots[0])<=90&&(regionAt(state.regions,a.point.x,a.point.z)?.owner===id||a.unit.destination?.point&&distance(a.unit.destination.point,r.slots[0])<=SIEGE_RADIUS)),attack=hostiles.reduce((n,a)=>n+a.unit.troops,0),cover=friends.filter(a=>distance(a.point,r.slots[0])<=12).reduce((n,a)=>n+a.unit.troops,0),siege=sieges.some(q=>q.regionId===r.id&&q.defender===id);return {region:r,attack,cover,siege}}).filter(x=>x.attack>0&&(x.siege||x.cover<x.attack*1.15)).sort((a,b)=>(b.attack-b.cover+(b.siege?200:0))-(a.attack-a.cover+(a.siege?200:0)));
  function send(target,kind,minimum){if(marches.some(m=>m.botTargetId===target.id&&!m.inBattle))return false;let pool=sources.filter(x=>distance(x.point,target.slots[0])>SIEGE_RADIUS&&x.unit.troops>=minimum).sort((a,b)=>distance(a.point,target.slots[0])-distance(b.point,target.slots[0]));let destination=roadNodeLocation(state.network,state.network.hubKeys.get(target.id));for(const source of pool){let result=orderArmy(state,source.selection,destination,id);if(result.ok){result.march.botTargetId=target.id;result.march.botIntent=kind;return true}}return false}
  for(const threat of threats)if(send(threat.region,'defend',30))return;
- let targets=state.regions.filter(r=>enemies.has(r.owner)).map(r=>{let defenders=foes.filter(a=>distance(a.point,r.slots[0])<=SIEGE_RADIUS).reduce((n,a)=>n+a.unit.troops,0),engaged=friends.some(a=>a.unit.inBattle&&distance(a.point,r.slots[0])<=SIEGE_RADIUS),already=friends.some(a=>!a.unit.inBattle&&distance(a.point,r.slots[0])<=SIEGE_RADIUS);return {region:r,defenders,engaged,already}}).filter(x=>!x.already||x.engaged).sort((a,b)=>(a.defenders-conquestTargetPriority(a.region))-(b.defenders-conquestTargetPriority(b.region))||distance(a.region.slots[0],sources[0].point)-distance(b.region.slots[0],sources[0].point));for(const target of targets.slice(0,12))if(send(target.region,'attack',Math.max(60,Math.ceil(target.defenders*(target.region.owner==='you'?1.15:1)))))return}
+ let targets=state.regions.filter(r=>enemies.has(r.owner)&&adjacentToFaction(state,r,id)).map(r=>{let defenders=foes.filter(a=>distance(a.point,r.slots[0])<=SIEGE_RADIUS).reduce((n,a)=>n+a.unit.troops,0),engaged=friends.some(a=>a.unit.inBattle&&distance(a.point,r.slots[0])<=SIEGE_RADIUS),already=friends.some(a=>!a.unit.inBattle&&distance(a.point,r.slots[0])<=SIEGE_RADIUS);return {region:r,defenders,engaged,already}}).filter(x=>!x.already||x.engaged).sort((a,b)=>(a.defenders-conquestTargetPriority(a.region))-(b.defenders-conquestTargetPriority(b.region))||distance(a.region.slots[0],sources[0].point)-distance(b.region.slots[0],sources[0].point));for(const target of targets.slice(0,12))if(send(target.region,'attack',Math.max(60,Math.ceil(target.defenders*(target.region.owner==='you'?1.15:1)))))return}
 function planBotPetition(id){
- const possible=state.regions.find(region=>region.owner==='neutral'&&neutralOccupationCheck(state,region,id).ok);
+ const f=state.factions?.[id];
+ if(!f||f.defeated||f.isRebel)return;
+ const candidates=rankBotExpansion(state,id);
+ const possible=candidates.find(({region})=>neutralOccupationCheck(state,region,id).ok)?.region;
  if(possible&&occupyNeutralDuchy(state,possible,id).ok)return;
- let f=state.factions?.[id];if(!f||state.economy.shipments.some(s=>s.kind==='petition'&&s.owner===id))return;let signal=strategySignals(state,id),minimum=signal.urgency>.5?85:110;if(f.gold<minimum||(armyTroops(state,id)<100&&f.gold<190)||(signal.urgency<.5&&f.gold<180&&state.regions.some(r=>r.owner===id&&r.buildings.length<2)))return;for(const candidate of rankBotExpansion(state,id)){let result=sendPetition(state,id,candidate.region);if(result.ok){f.lastExpansion={regionId:candidate.region.id,cutoff:candidate.cutoff,contested:candidate.playerAdjacent||candidate.enemyEnRoute};return}}
- if(state.seaPetitionPath&&state.regions.some(r=>r.owner===id&&r.buildings.some(b=>b.type==='port'))){
-  const home=state.regions.find(r=>r.id===f.regionId);
-  state.regions.filter(r=>r.owner==='neutral'&&r.coast).sort((a,b)=>distance(a.slots[0],home.slots[0])-distance(b.slots[0],home.slots[0])).slice(0,5)
-   .some(r=>sendPetition(state,id,r).ok);
+ if(!candidates.length||state.economy.shipments.some(s=>s.kind==='petition'&&s.owner===id))return;
+ const {urgency}=strategySignals(state,id),minimum=urgency>.5?85:110;
+ if(f.gold<minimum||(armyTroops(state,id)<100&&f.gold<190)||
+  (urgency<.5&&f.gold<180&&state.regions.some(r=>r.owner===id&&r.buildings.length<2)))return;
+ for(const candidate of candidates){
+  if(!sendPetition(state,id,candidate.region).ok)continue;
+  f.lastExpansion={regionId:candidate.region.id,contested:candidate.contested};
+  return;
  }
 }
 
@@ -5295,7 +5456,7 @@ function botPortPlans(id){
  }
  return fallback?[fallback]:[];
 }
-function developBot(id){let f=state.factions?.[id];if(!f||f.defeated||f.isRebel)return;const tx=(name,fn)=>{const s0=performance.now();const r=fn();const d=performance.now()-s0,w=state._phaseTimings?.worst;if(w&&d>(w['d:'+name]||0))w['d:'+name]=d;return r};let signal=tx('signals',()=>strategySignals(state,id)),reserve=signal.urgency>.5||isAtWar(state,'you',id)?75:85,owned=state.regions.filter(r=>r.owner===id&&!vassalFor(state,r)),legacyReady=owned.length>=2&&armyTroops(state,id)>=100&&owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0)>=2,playerHasPort=state.regions.some(r=>r.owner==='you'&&r.buildings.some(b=>b.type==='port')),tradeRival=state.campaign?.pressure?.path==='trade'&&f.commerceTarget===state.campaign.pressure.owner,plans=f.gold>=65&&(playerHasPort||legacyReady||tradeRival)?tx('portPlans',()=>botPortPlans(id).filter(p=>!vassalFor(state,p.region))):[],opportunity=plans.find(p=>p.reachable),plan=opportunity||(legacyReady||tradeRival?plans[0]:null),portBudget=TYPES.port.cost+(opportunity||tradeRival?15:70);
+function developBot(id){let f=state.factions?.[id];if(!f||f.defeated||f.isRebel)return;const tx=(name,fn)=>{const s0=performance.now();const r=fn();const d=performance.now()-s0,w=state._phaseTimings?.worst;if(w&&d>(w['d:'+name]||0))w['d:'+name]=d;return r};let signal=tx('signals',()=>strategySignals(state,id)),reserve=signal.urgency>.5||isAtWar(state,'you',id)?75:85,owned=state.regions.filter(r=>r.owner===id&&!vassalFor(state,r)),legacyReady=owned.length>=2&&armyTroops(state,id)>=100&&owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0)>=2,playerHasPort=state.regions.some(r=>r.owner==='you'&&r.buildings.some(b=>b.type==='port')),tradeRival=state.campaign?.pressure?.path==='trade'&&f.commerceTarget===state.campaign.pressure.owner,islandStart=!!state.seaPetitionPath&&owned.some(r=>r.id===f.regionId&&r.coast&&!r.adj.length),plans=f.gold>=65&&(playerHasPort||legacyReady||tradeRival||islandStart)?tx('portPlans',()=>botPortPlans(id).filter(p=>!vassalFor(state,p.region))):[],opportunity=plans.find(p=>p.reachable),plan=opportunity||(legacyReady||tradeRival||islandStart?plans[0]:null),portBudget=TYPES.port.cost+(opportunity||tradeRival||islandStart?15:70);
  if(owned.length>realmRank(state,id).capacity){
   const excessLands=realmAdministration(state,id).excessLands;
   const region=owned.filter(r=>excessLands.has(r.id)&&vassalGrantCheck(state,r,null,id).ok).sort((a,b)=>duchyStability(a)-duchyStability(b))[0];
@@ -5700,6 +5861,7 @@ function dispatchTrade(owner='you',vassal=null,lands=[]){
    if(amount<1)continue;
    const value=amount*TRADE_PRICE.grain,path=lane.path.slice().reverse();
    ledger.gold-=value;seller.stocks.grain-=amount;
+   if(!vassal)recordCampaignIncome(state,owner,-value);
    economy.shipments.push({kind:'import',owner,vassalId:vassal?.id,departureRegionId:importTown.id,fleetClass:'land',seller:id,sourceTradeRegionId:lane.destinationRegionId,
     good:'grain',amount,value,path,elapsed:0,duration:journeyDuration(path)});
    if(owner==='you'&&!vassal){economy.tradeSpent+=value;flash('Куплено зерно: обоз направляется в столицу')}
@@ -5787,8 +5949,9 @@ function updateToolAffordability(){
   button.classList.toggle('unaffordable',unaffordable);
   button.classList.toggle('affordable',state.started&&!unaffordable);
   button.setAttribute('aria-disabled',String(unaffordable));
-  const note=button.querySelector?.('.tool-tip em');
-  if(note)note.textContent=cost+' зл. · 1 графство'+(unaffordable?' · не хватает '+missing.join(' · '):'');
+  const warning=button.querySelector('.tool-shortfall');
+  warning.hidden=!unaffordable;
+  if(unaffordable)setGameStatText(warning,'Не хватает '+missing.join(' · '));
  });
 }
 const MONTHS_RU=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
@@ -6420,12 +6583,32 @@ function updateDuchyCard(region){
    state.gold<HARBOR_CHARTER_COST?'Не хватает '+Math.ceil(HARBOR_CHARTER_COST-state.gold)+' зл.':$('diplomacy-hint').textContent],
   ['war-declare','Объявление войны',$('war-status').textContent]]);
 }
-function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncMapStats();const income=treasuryIncomeReport(),domain=realmAdministration(state,'you');renderCampaignPanel();updateMuster();updateRealmOverview(domain);updateCouncil(income);if(selectedBuilding)updateBuildingDetails();let slotState=mode?mode+':'+(state.gold>=TYPES[mode].cost):'';if(slotState!==lastSlotAffordability){lastSlotAffordability=slotState;dirtyLabels=true;if(mode&&hover)updateGhost(hover)}updateBattlePanel();$('traffic-legend').hidden=!state.started||!state.economy?.roadTraffic?.size;updateToolAffordability();let d=gameDate(state.economy?.seconds||0);$('game-date').textContent=globalThis.gameI18n?.date(d)??(d.day+' '+MONTHS_RU[d.month]+' '+d.year+' г.');updateTreasury(income);
- const brandCrest=$('.crest'),realmCrestKey=state.started?'realm:'+state.capitalId:'menu';
- if(brandCrest&&brandCrest.dataset.heraldry!==realmCrestKey){
-  brandCrest.dataset.heraldry=realmCrestKey;
-  brandCrest.innerHTML=state.started?heraldryShield(realmCrestKey,34):'✦';
+function summaryDuchy(){
+ return state.selected?.owner==='you'?state.selected:state.regions.find(region=>region.id===state.capitalId);
+}
+const seatSummaryButton=$('seat-summary-open');
+seatSummaryButton.onclick=()=>{
+ const region=summaryDuchy();
+ if(region)setSelected(state.selected===region?null:region);
+};
+function updateSettlementDock(){
+ const region=summaryDuchy(),dock=seatSummaryButton.closest('.settlement-dock');
+ dock.hidden=!state.started||state.defeated||!region;
+ if(dock.hidden)return;
+ const crest=$('seat-summary-crest');
+ if(crest.dataset.region!==String(region.id)){
+  crest.dataset.region=String(region.id);
+  crest.innerHTML=heraldryShield('realm:'+region.id,23);
+  $('seat-summary-name').textContent=region.city;
  }
+ seatSummaryButton.setAttribute('aria-expanded',String(state.selected===region));
+ const stability=duchyStability(region,cityDefenders.get(region.id));
+ const control=$('seat-summary-control');
+ control.textContent=stability+'%';
+ control.dataset.level=stability<=50?'critical':stability<70?'warning':'normal';
+ $('seat-summary-population').textContent=Math.floor(duchyPopulation(region)).toLocaleString(interfaceLocale);
+}
+function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncMapStats();const income=treasuryIncomeReport(),domain=realmAdministration(state,'you');renderCampaignPanel();updateMuster();updateSettlementDock();updateRealmOverview(domain);updateCouncil(income);if(selectedBuilding)updateBuildingDetails();let slotState=mode?mode+':'+(state.gold>=TYPES[mode].cost):'';if(slotState!==lastSlotAffordability){lastSlotAffordability=slotState;dirtyLabels=true;if(mode&&hover)updateGhost(hover)}updateBattlePanel();$('traffic-legend').hidden=!state.started||!state.economy?.roadTraffic?.size;updateToolAffordability();let d=gameDate(state.economy?.seconds||0);$('game-date').textContent=globalThis.gameI18n?.date(d)??(d.day+' '+MONTHS_RU[d.month]+' '+d.year+' г.');updateTreasury(income);
  $('realm-label').textContent='ДОМЕН';
  const domainCount=$('lands'),domainButton=$('domain-shortcut');
  domainCount.textContent=state.started?domain.direct+' / '+domain.capacity:'0';
@@ -6433,8 +6616,8 @@ function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncM
  domainButton.title=domain.excess?'Сверх лимита '+domain.excess+' · выпуск и налоги прямого домена −'+Math.round((1-domain.yieldFactor)*100)+'%. Лишние земли теряют контроль. Нажмите, чтобы увидеть список.':'Прямое управление '+domain.direct+' из '+domain.capacity+' земель. Владения вассалов не занимают места в домене.';
  explainAction(domainButton,'Лимит домена',domainButton.title);
  renderRealmPower();let r=state.selected;$('card').hidden=!r;$('slots').textContent=r&&r.owner==='you'?r.buildings.length+' / '+r.slots.length:'—';
- if(!r)return;
- updateDuchyCard(r);updateResources();updateBuildingDetails();
+ updateResources();
+ if(r)updateDuchyCard(r);
 }
 
 // A compact, live ledger makes governance actionable without obscuring the map.
@@ -7264,6 +7447,20 @@ $('campaign-threats').onclick=event=>{
  showCampaignPanel(true);
  $('campaign-paths').querySelector('.'+path)?.scrollIntoView({block:'nearest'});
 };
+function tradeEmbargoControl(owner){
+ const {by,remaining,cooldown}=campaignEmbargoStatus(state,'you',owner);
+ if(isAtWar(state,'you',owner))return {label:'Торговля закрыта войной',disabled:true};
+ if(remaining)return by==='you'?{label:'Снять эмбарго · '+campaignTime(remaining),disabled:false}:
+  {label:'Эмбарго соперника · '+campaignTime(remaining),disabled:true};
+ if(cooldown)return {label:'Эмбарго через '+campaignTime(cooldown),disabled:true};
+ return {label:'Ввести эмбарго · '+campaignTime(EMBARGO_DURATION),disabled:false};
+}
+function togglePlayerEmbargo(owner){
+ const result=setCampaignEmbargo(state,'you',owner);
+ if(!result)return;
+ flash((result.active?'Эмбарго введено · ':'Эмбарго снято · ')+countryName(owner));
+ updateCampaign(state,0);updateUI();
+}
 function renderCampaignPanel(){
  const c=state.campaign;
  $('campaign-toggle').hidden=!c||state.defeated;
@@ -7274,14 +7471,17 @@ function renderCampaignPanel(){
  const p=c.progress.get('you');
  if(!p)return;
  const rules=c.rules,leader=c.leader,remaining=Math.max(0,Math.ceil(rules.minTime-(state.economy?.seconds||0)));
+ const gold=n=>Math.floor(n+1e-8).toLocaleString(interfaceLocale);
  const lines={
   trade:[['Рынки с повторными поставками за 4 мин.',p.trade.repeatBuyers.length+' / '+p.trade.requiredPartners],
    ['Выручка за партию',Math.floor(p.trade.turnover)+' / '+rules.turnover+' зл.'],
-   ['Выручка в минуту',Math.floor(p.trade.income)+' / '+p.trade.requiredIncome+' зл.'],
+   ['Торговая выручка в минуту',Math.floor(p.trade.income)+' / '+p.trade.requiredIncome+' зл.'],
+   ['Золото в казне · порог 51%',gold(p.trade.gold)+' / '+gold(p.trade.requiredGold)+' зл.'],
+   ['Доход за 30 дней · порог 51%',gold(p.trade.monthlyIncome)+' / '+gold(p.trade.requiredMonthlyIncome)+' зл.'],
    ['Условия удерживаются',Math.floor(p.trade.held)+' / '+rules.tradeHold+' сек.']],
   military:[['Стартовые столицы под контролем',p.military.held.length+' / '+p.military.requiredCapitals],
    ['Своя стартовая столица',p.military.holdsOwn?'Под контролем':'Потеряна']],
-  diplomacy:[['Союзы старше '+rules.allianceAge+' сек.',p.diplomacy.allies.length+' / '+rules.allies],
+  diplomacy:[['Союзы старше '+rules.allianceAge+' сек.',p.diplomacy.allies.length+' / '+p.diplomacy.requiredAllies],
    ['Стабильность столицы',p.diplomacy.stability+' / '+rules.stability+(p.diplomacy.besieged?' · осада':'')],
    ['Уровень столицы',p.diplomacy.homeLevel+' / '+rules.diplomaticCapitalLevel],
    ['Союз удерживается',Math.floor(p.diplomacy.held)+' / '+rules.diplomaticHold+' сек.']]
@@ -7305,28 +7505,32 @@ function renderCampaignPanel(){
  const allianceLegends=p.diplomacy.activeAlliances.map(pact=>countryName(pact.owner)+
   (pact.matureAt>state.economy.seconds?' ('+campaignTime(pact.matureAt-state.economy.seconds)+')':'')).join(' · ');
  const hints={
-  trade:'Откройте рынки, настройте экспорт и удерживайте выручку. Эмбарго закрывает ваш рынок для выбранной державы. Другие рынки остаются доступны.',
-  diplomacy:'Заключайте союзы, развивайте столицу и держите её вне осады. Разрыв вашего союза с соперником или осада его столицы могут остановить отсчёт.'
+  trade:'Соберите 51% от общей казны остальных держав и получайте 51% от суммы их положительных доходов. Доход за 30 игровых дней учитывает налоги, торговлю и текущие расходы. Эмбарго временно закрывает взаимную торговлю.',
+  diplomacy:'Заключайте союзы с соседними державами, развивайте столицу и держите её вне осады. Региональные союзы ботов направлены против общего соседа.'
  };
  const content=CAMPAIGN_PATHS.map(path=>{
   const percent=Math.floor(p[path].score*100);
   const details=lines[path].map(([label,value])=>'<div><dt>'+label+'</dt><dd>'+value+'</dd></div>').join('');
-  const rival=c.threats?.[path]?.owner||c.pathLeaders?.[path]?.owners.find(owner=>owner!=='you');
+  const rival=c.threats?.[path]?.owner||c.pathLeaders?.[path]?.owners.find(owner=>owner!=='you')||
+   (path==='trade'?[...c.progress].filter(([owner])=>owner!=='you').sort((a,b)=>b[1].trade.score-a[1].trade.score)[0]?.[0]:null);
   const rivalProgress=c.progress.get(rival)?.[path];
   const ownStatus=path!=='military'&&(p[path].eligible?'До победы '+campaignTime(p[path].remaining):p[path].blockedFor?'Отсчёт приостановлен · сброс через '+campaignTime(p[path].blockedFor):'Ожидаем выполнения условий');
   const rivalStatus=rivalProgress&&(path==='trade'?
-   'рынки '+rivalProgress.repeatBuyers.length+'/'+rules.partners+' · выручка '+Math.floor(rivalProgress.income)+'/'+rivalProgress.requiredIncome+' зл./мин · всего '+Math.floor(rivalProgress.turnover)+'/'+rules.turnover+' зл.':
-   path==='diplomacy'?'союзы '+rivalProgress.allies.length+'/'+rules.allies+' · уровень столицы '+rivalProgress.homeLevel+'/'+rules.diplomaticCapitalLevel+' · стабильность '+rivalProgress.stability+'/'+rules.stability+(rivalProgress.besieged?' · осада':''):
+   'казна '+gold(rivalProgress.gold)+' / '+gold(rivalProgress.requiredGold)+' зл. · доход за 30 дней '+gold(rivalProgress.monthlyIncome)+' / '+gold(rivalProgress.requiredMonthlyIncome)+' зл. · рынки '+rivalProgress.repeatBuyers.length+'/'+rivalProgress.requiredPartners:
+   path==='diplomacy'?'союзы '+rivalProgress.allies.length+'/'+rivalProgress.requiredAllies+' · уровень столицы '+rivalProgress.homeLevel+'/'+rules.diplomaticCapitalLevel+' · стабильность '+rivalProgress.stability+'/'+rules.stability+(rivalProgress.besieged?' · осада':''):
    'столицы '+rivalProgress.held.length+'/'+rivalProgress.requiredCapitals);
   const rivalTimer=path!=='military'&&(rivalProgress?.eligible?'До победы '+campaignTime(rivalProgress.remaining):rivalProgress?.blockedFor?'Пауза · сброс через '+campaignTime(rivalProgress.blockedFor):'');
-  const rivalLine=rivalStatus?'<div class="campaign-rival"><button type="button" data-campaign-owner="'+escapeCampaignText(rival)+'">'+escapeCampaignText(countryName(rival))+' · '+Math.floor(rivalProgress.score*100)+'%</button><small>'+rivalStatus+(rivalTimer?'<br>'+rivalTimer:'')+'</small></div>':'';
+  const embargo=path==='trade'&&rivalProgress&&!c.result?tradeEmbargoControl(rival):null;
+  const embargoButton=embargo?'<button type="button" data-campaign-embargo="'+escapeCampaignText(rival)+'"'+(embargo.disabled?' disabled':'')+'>'+embargo.label+'</button>':'';
+  const rivalLine=rivalStatus?'<div class="campaign-rival"><button type="button" data-campaign-owner="'+escapeCampaignText(rival)+'">'+escapeCampaignText(countryName(rival))+' · '+Math.floor(rivalProgress.score*100)+'%</button><small>'+rivalStatus+(rivalTimer?'<br>'+rivalTimer:'')+'</small>'+embargoButton+'</div>':'';
+  const rivalTotals=path==='trade'?'<small>У остальных держав · казна '+gold(p.trade.rivalGold)+' зл. · доход за 30 дней '+gold(p.trade.rivalIncome)+' зл.</small>':'';
   return '<section class="campaign-path '+path+'"><div class="campaign-path-title"><h3>'+CAMPAIGN_VICTORY_NAMES[path]+'</h3><b>'+percent+'%</b></div>'+
-   '<progress aria-label="'+CAMPAIGN_VICTORY_NAMES[path]+'" value="'+percent+'" max="100"></progress><dl>'+details+'</dl>'+
+   '<progress aria-label="'+CAMPAIGN_VICTORY_NAMES[path]+'" value="'+percent+'" max="100"></progress><dl>'+details+'</dl>'+rivalTotals+
    (path==='military'?'<p class="campaign-capital-rule">Удержите все стартовые столицы одновременно.</p><div class="campaign-cities">'+cities+'</div>':
     '<p class="campaign-path-status">'+ownStatus+'</p>'+(path==='diplomacy'&&allianceLegends?'<small>'+escapeCampaignText(allianceLegends)+'</small>':'')+'<p>'+hints[path]+'</p>')+rivalLine+'</section>';
  }).join('');
  const list=$('campaign-paths'),active=document.activeElement;
- const focus=list.contains(active)?[active.dataset.campaignCity?'campaignCity':'campaignOwner',active.dataset.campaignCity??active.dataset.campaignOwner]:null;
+ const focus=list.contains(active)?Object.entries(active.dataset).find(([key])=>['campaignCity','campaignOwner','campaignEmbargo'].includes(key)):null;
  if(content!==list.dataset.content){
   list.dataset.content=content;
   list.innerHTML=content;
@@ -7340,7 +7544,7 @@ function onCampaignPact(a,b,against){
   recordRecapMoment(state,'alliance',{regionId,title:'Заключён союз',detail:countryName(other),weight:77});
   addNotice('diplomacy','Союз заключён',countryName(other)+' · взаимный проход и оборона.',regionId);
  }
- else if(against==='you')addNotice('diplomacy','Оборонительный союз',countryName(a)+' и '+countryName(b)+' объединяются против военной угрозы.',state.factions[a]?.regionId);
+ else if(against==='you')addNotice('diplomacy','Региональный союз против вас',countryName(a)+' и '+countryName(b)+' договорились действовать вместе на вашей общей границе.',state.factions[a]?.regionId);
 }
 let recapPlayback=null;
 $('campaign-recap').hidden=true;
@@ -7593,12 +7797,17 @@ function updateCampaignDiplomacy(owner){
  $('diplomacy-ally').disabled=!alliance.ok;
  $('diplomacy-break').hidden=!allied;
  const embargo=$('diplomacy-embargo');
+ const action=tradeEmbargoControl(owner);
  embargo.hidden=owner==='you';
- embargo.textContent=campaignTradeEmbargo(state,'you',owner)?'Снять эмбарго':'Ввести эмбарго';
- embargo.title='Приостанавливает торговлю между вашей и выбранной державой';
+ embargo.disabled=action.disabled;
+ embargo.textContent=action.label;
+ embargo.title='Закрывает взаимную торговлю на '+campaignTime(EMBARGO_DURATION)+'. Повтор возможен через '+campaignTime(EMBARGO_COOLDOWN)+' после введения.';
  const charter=campaignPortCharter(state),offer=allied&&!charter?campaignHarborOffer(owner):null;
  const partners=campaignAllies(state,owner).filter(id=>id!=='you');
- $('diplomacy-defenders').textContent=partners.length?'Союзники державы · '+partners.map(countryName).join(', '):'';
+ $('diplomacy-defenders').textContent=partners.length?'Союзники державы · '+partners.map(partner=>{
+  const target=state.campaign.pacts.get(warKey(owner,partner))?.against;
+  return countryName(partner)+(target?' (против '+countryName(target)+')':'');
+ }).join(', '):'';
  $('diplomacy-harbor').hidden=!offer;
  $('diplomacy-harbor').disabled=state.gold<HARBOR_CHARTER_COST;
  $('diplomacy-harbor').textContent='Доступ к порту · '+HARBOR_CHARTER_COST+' зл.';
@@ -7610,6 +7819,7 @@ $('campaign-toggle').onclick=()=>showCampaignPanel($('campaign-panel').hidden);
 for(const button of victoryButtons)button.onclick=()=>showCampaignPanel($('campaign-panel').hidden);
 $('campaign-close').onclick=()=>showCampaignPanel(false);
 $('campaign-paths').onclick=event=>{
+ if(event.target.dataset?.campaignEmbargo){togglePlayerEmbargo(event.target.dataset.campaignEmbargo);return;}
  const owner=event.target.dataset?.campaignOwner;
  if(owner){focusCampaignCapital(owner);return}
  const cityId=event.target.dataset?.campaignCity;
@@ -7655,14 +7865,7 @@ $('diplomacy-break').onclick=()=>{
  if(breakCampaignAlliance(state,owner))flash('Союз расторгнут · '+countryName(owner));
  updateUI();
 };
-$('diplomacy-embargo').onclick=()=>{
- const owner=state.selected?.owner,c=state.campaign;
- if(!c||owner==='you'||!campaignNationAlive(state,owner)||isAtWar(state,'you',owner))return;
- const key=warKey('you',owner);
- if(!c.embargoes.delete(key))c.embargoes.add(key);
- flash((c.embargoes.has(key)?'Эмбарго введено · ':'Эмбарго снято · ')+countryName(owner));
- updateCampaign(state,0);updateUI();
-};
+$('diplomacy-embargo').onclick=()=>togglePlayerEmbargo(state.selected?.owner);
 $('diplomacy-harbor').onclick=()=>{
  const offer=acceptHarborCharter(state.selected?.owner);
  if(!offer)return;
@@ -7737,16 +7940,54 @@ $('occupy-neutral').onclick=()=>{
 $('petition-send').onclick=()=>{const r=state.selected,q=sendPetition(state,'you',r);if(!q.ok){flash(q.reason);updateUI();return}flash('Обоз отправлен: '+r.city+' · '+Math.ceil(q.ship.duration)+' сек.');updateUI()};
 const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест в сфере услуг и +1 к цели довольства.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает морскую торговлю с портами соперников.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
 const ICONS={
-city:'<path fill="#c7b792" stroke="#463b2b" d="M3 27V17l4-3 5 3v10zm10 0V11l5-4 5 4v16zm11 0V15l3-2 3 2v12z"/><path fill="#a04d39" stroke="#573429" d="M2 16l5-5 6 5zm10-6 6-6 6 6zm11 4 4-4 4 4z"/><path fill="#493b2e" stroke="none" d="M7 20h2v3H7zm9-7h2v3h-2zm4 0h2v3h-2zm-2 9h3v5h-3zm9-4h2v3h-2z"/>',
-grain:'<path fill="#d7b258" stroke="#705a31" d="M2 25h28v4H2z"/><path fill="#dbc89b" stroke="#594b35" d="M8 25V13l6-4 6 4v12z"/><path fill="#9d5138" stroke="#57362a" d="M6 13l8-7 8 7z"/><path fill="#5b4933" stroke="none" d="M12 19h4v6h-4z"/><path stroke="#e5c565" stroke-width="2" d="M25 24V11m0 4-3-2m3 5 3-3m-3 7-3-2m3-9 2-3"/>',
-wood:'<path fill="#526d43" stroke="#263e2a" d="M3 19 9 5l6 14h-3v5H6v-5z"/><path fill="#bda479" stroke="#4d392a" d="M13 25V14l6-4 7 4v11z"/><path fill="#8b4e35" stroke="#4d3025" d="M12 14l7-6 8 6z"/><path stroke="#b88650" stroke-width="3" d="M19 27h10m-9-3h9m-8-3h8"/>',
-iron:'<path fill="#777c74" stroke="#3b423d" d="M2 27 9 12l5 5 4-8 12 18z"/><path fill="#383d3b" stroke="#beb4a0" d="M8 27v-6l4-4 4 4v6z"/><path fill="#c4a25c" stroke="#504532" d="m20 6 6-3 1 2-6 3zm-1 2 2-1 5 10-2 1z"/><path stroke="#ddcdb0" d="m8 25 5-6"/>',
-cloth:'<path fill="#c3ad86" stroke="#594735" d="M4 26V13l7-5 7 5v13z"/><path fill="#9c4b3c" stroke="#583428" d="M3 13l8-7 8 7z"/><path fill="#5b7292" stroke="#283e56" d="M19 15h10v12H19z"/><path stroke="#d8c9a5" stroke-width="1.2" d="M21 17v8m3-8v8m3-8v8m-7-6h8m-8 3h8m-8 3h8"/>',
-port:'<path fill="#4d7580" stroke="#263f45" d="M2 24h28v4H2z"/><path fill="#a8875d" stroke="#503c2b" d="M4 21h17v3H4zM6 21v-7l5-3 5 3v7z"/><path fill="#98513b" stroke="#58372a" d="M4 14l7-6 7 6z"/><path fill="#dfd4b4" stroke="#5a5141" d="M23 7v13h6z"/><path stroke="#74563e" stroke-width="1.5" d="M23 5v16m-4 0h11"/>'};
+city:'<path fill="#777466" d="M2 27l14-5 14 3v3l-16 2z"/><path fill="#e0c9a3" d="M5 25V16l5-3 4 3v10zm7 2V9l5-3 5 4v16zm9-2v-9l4-3 4 4v8z"/><path fill="#aa916f" d="M10 15l4 1v10l-4-1zm7-7 5 2v16l-5 1zm8 7 4 2v8h-4z"/><path fill="#a76047" d="M3 17l6-6 6 5-4 1-2-2-3 3zm8-7 6-8 7 8-5 1-2-3-4 4zm9 7 5-6 5 6-3 1-2-2-3 2z"/><path fill="#4d3d34" d="M7 20h2v3H7zm7-7h2v3h-2zm4 0h2v3h-2zm-3 9h3v5h-3zm8-3h2v3h-2z"/>',
+grain:'<path fill="#777d45" d="M2 24l10-6 18 5-6 6H4z"/><path fill="#bb9c55" d="m4 25 10-5 2 1-9 6zm7 3 9-6 3 1-8 5zm8 0 7-4 2 1-5 3z"/><path fill="#dfc89e" d="M8 22V13l6-5 5 5v10z"/><path fill="#9c7950" d="m16 12 3 1v10h-3z"/><path fill="#9d7146" d="M6 15l7-8 8 6-3 2-5-4-4 5z"/><path fill="#675339" d="M11 17h3v5h-3z"/><path stroke="#d5b972" stroke-width="1.5" d="M25 25V11m0 5-3-3m3 6 4-3m-4 6-4-3"/>',
+wood:'<path fill="#779366" d="m1 19 6-13 6 13H9v6H5v-6z"/><path fill="#486754" d="m7 6 6 13H9v6H7z"/><path fill="#a57853" d="M10 26V14l8-4 8 4v12z"/><path fill="#72583f" d="m18 12 8 2v12h-8z"/><path fill="#ad8460" d="m8 16 9-9 11 7-4 3-7-5-6 6z"/><path fill="#423629" d="M12 19h4v6h-4z"/><path stroke="#a78459" stroke-width="3" stroke-linecap="round" d="M19 27h11m-8-3h8m-7-3h6"/><path stroke="#d7b480" stroke-width="2" stroke-linecap="round" d="M28 27h.4m0-3h.4m-1-3h.4"/>',
+iron:'<path fill="#a7aaa0" d="M2 26l5-10 6-4 5 2 5 2 7 11-7 2H5z"/><path fill="#6b7975" d="m14 12 4 2 5 2 7 11-7 2-5-10zm-12 14 5-10 2 4-3 7z"/><path fill="#2d3a37" stroke="#c9b7a0" stroke-width="2.4" d="M9 27v-7l5-4 6 4v7z"/><path stroke="#bfc4b5" stroke-width="1.2" d="m20 13 2-2 6 3m-3 6 2 5M4 25l3-4"/><path fill="#cda56c" d="M14 25h2v2h-2z"/>',
+cloth:'<path fill="#6b5650" d="m3 23 23-1 4 4-5 3H4z"/><path fill="#85554c" d="M4 14l7-4h12l3 3v5H10L4 20z"/><path fill="#ad7868" d="M4 16v5h16v-5c0-3-4-5-7-4z"/><path fill="#d8c19a" d="M7 20l10-2h10l3 2v6H7z"/><path fill="#917b62" d="M8 20h10c3 0 5 2 5 5v2H7z"/><path fill="#ae9472" d="M3 20l5-2 7 2 2 6H3z"/><path stroke="#e4cda8" stroke-width="1.2" d="M24 20c2 1 2 3 2 5m1-6c2 2 2 4 2 6"/>',
+port:'<path fill="#548482" d="m2 26 7-2 18 1 3 2-5 2H7z"/><path fill="#845e41" d="M2 21l7 2 21-3-5 6H9z"/><path fill="#c59d6c" d="m7 23 20-2-2 2-14 2z"/><path fill="#e7dac0" d="M16 7c-4 3-7 8-7 13l7-1zm2 0c4 2 7 7 7 10l-7 2z"/><path fill="#aaa995" d="M16 8l-4 11 4-1zm2 8 6-1 1 2-7 2z"/><path stroke="#72604b" stroke-width="1.2" d="M17 5v16m-6-2 12-2"/><path fill="#c49e68" d="M17 5l7 2-7 1z"/>'};
 
-for(const [i,[type,t]] of Object.entries(TYPES).entries()){let b=document.createElement('button');b.className='tool';b.dataset.type=type;const helpLabel=`${localizedLabel(t.name)}: ${localizedLabel(TOOL_INFO[type][0])} ${localizedLabel(t.cost+' золотых')}`;b.setAttribute('aria-label',globalThis.gameI18n?.rendered(helpLabel)??helpLabel);b.setAttribute('aria-describedby','tip-'+type);b.innerHTML=`<span class="hotkey">${i+1}</span><span class="icon"><svg viewBox="0 0 32 32" aria-hidden="true">${ICONS[type]}</svg></span><span class="name">${t.name}</span><span class="cost">${t.cost} зл.</span><span id="tip-${type}" role="tooltip" class="tool-tip"><strong>${t.name}</strong><span>${TOOL_INFO[type][0]}</span><small>${TOOL_INFO[type][1]}</small><em>${t.cost} зл. · 1 графство · клавиша ${i+1}</em></span>`;b.querySelector('.cost').dataset.gameStat='gold';
- for(const hint of b.querySelectorAll('.tool-tip > span,.tool-tip > small,.tool-tip > em'))setGameStatText(hint,hint.textContent);
- b.onclick=()=>selectMode(type);$('tools').appendChild(b)}
+for(const [type,building] of Object.entries(TYPES)){
+ const button=document.createElement('button');
+ const [description,note]=TOOL_INFO[type];
+ const price=`${building.cost} зл.`;
+ button.type='button';
+ button.className='tool';
+ button.dataset.type=type;
+ button.setAttribute('aria-label',localizedLabel(building.name));
+ button.setAttribute('aria-describedby','tip-'+type);
+ button.innerHTML=`
+  <kbd class="hotkey" aria-hidden="true"></kbd>
+  <span class="icon"><svg viewBox="0 0 32 32" aria-hidden="true">${ICONS[type]}</svg></span>
+  <span class="name">${building.name}</span>
+  <span class="cost" data-game-stat="gold">${price}</span>
+  <span id="tip-${type}" role="tooltip" class="tool-tip">
+   <span class="tool-tip-heading"><strong>${building.name}</strong><kbd class="tool-shortcut"></kbd></span>
+   <span class="tool-description"></span>
+   <span class="tool-note"></span>
+   <span class="tool-tip-facts">
+    <span class="tool-fact" data-game-stat="gold">${resourceGlyph('gold')} <b>${price}</b></span>
+    <span class="tool-fact"><svg class="ui-glyph" viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-parcels"/></svg>1 графство</span>
+   </span>
+   <span class="tool-shortfall" hidden></span>
+  </span>`;
+ setGameStatText(button.querySelector('.tool-description'),description);
+ setGameStatText(button.querySelector('.tool-note'),note);
+ button.onclick=()=>selectMode(type);
+ $('tools').appendChild(button);
+}
+function syncShortcutHints(){
+ const label=action=>gameSettings.keyName(gameSettings.getKey(action));
+ for(const button of $('tools').children){
+  const text=label(button.dataset.type);
+  button.querySelector('.hotkey').textContent=text;
+  button.querySelector('.tool-shortcut').textContent=text;
+ }
+ $('muster-toggle').querySelector('kbd').textContent=label('muster');
+ $('camera-home').title='К столице и исходному ракурсу ('+label('capital')+')';
+}
+syncShortcutHints();
+gameSettings.onChange(syncShortcutHints);
 function finishConstruction(result){
  const {building,r}=result;
  if(building.type==='port'){
@@ -7903,7 +8144,7 @@ function selectArea(x1,y1,x2,y2){
 }
 function updateSelectionBox(rect,x,y){let box=$('selection-box'),a=drag.x-rect.left,b=drag.y-rect.top;box.style.left=Math.min(a,x)+'px';box.style.top=Math.min(b,y)+'px';box.style.width=Math.abs(x-a)+'px';box.style.height=Math.abs(y-b)+'px';box.hidden=false}
 canvas.addEventListener('pointerdown',e=>{let button=e.button??0;drag={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false,button,select:button===0&&!councilMapOrder&&!mode&&state.started};canvas.setPointerCapture(e.pointerId);if(button!==0)e.preventDefault?.()});
-canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect();if(drag){let dx=e.clientX-drag.lastX,dy=e.clientY-drag.lastY;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;if(drag.moved){if(drag.select){updateSelectionBox(rect,e.clientX-rect.left,e.clientY-rect.top)}else if(drag.button===2){cam.yaw=(cam.yaw||0)-dx*.006;cam.tilt=Math.max(.4,Math.min(1.8,(cam.tilt??DEFAULT_CAMERA_TILT)+dy*.006));dirtyLabels=true}else if(drag.button===1)moveCameraScreen(dx,dy)}drag.lastX=e.clientX;drag.lastY=e.clientY}
+canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect();if(drag){const speed=preferences.mouseSpeed/100;let dx=(e.clientX-drag.lastX)*speed,dy=(e.clientY-drag.lastY)*speed;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;if(drag.moved){if(drag.select){updateSelectionBox(rect,e.clientX-rect.left,e.clientY-rect.top)}else if(drag.button===2){cam.yaw=(cam.yaw||0)-dx*.006;cam.tilt=Math.max(.4,Math.min(1.8,(cam.tilt??DEFAULT_CAMERA_TILT)+dy*.006));dirtyLabels=true}else if(drag.button===1)moveCameraScreen(dx,dy)}drag.lastX=e.clientX;drag.lastY=e.clientY}
  const x=e.clientX-rect.left,y=e.clientY-rect.top;
  if(councilMapOrder)return;
  if(mode){hoverPlacement(x,y);return}
@@ -7954,10 +8195,11 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,but
   if(duchySeat(region))playSelectionSound('city');
  }
 });
-canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});canvas.addEventListener('wheel',e=>{e.preventDefault();let rect=canvas.getBoundingClientRect(),old=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.scale=Math.max(.0023/WORLD_SCALE,Math.min(.08,cam.scale*Math.exp(-e.deltaY*.001)));let next=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.x+=old.x-next.x;cam.z+=old.z-next.z;dirtyLabels=true;if(mode&&!councilMapOrder)hoverPlacement(e.clientX-rect.left,e.clientY-rect.top)},{passive:false});
+canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});canvas.addEventListener('wheel',e=>{e.preventDefault();let rect=canvas.getBoundingClientRect(),old=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.scale=Math.max(.0023/WORLD_SCALE,Math.min(.08,cam.scale*Math.exp(-e.deltaY*.001*preferences.zoomSpeed/100)));let next=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.x+=old.x-next.x;cam.z+=old.z-next.z;dirtyLabels=true;if(mode&&!councilMapOrder)hoverPlacement(e.clientX-rect.left,e.clientY-rect.top)},{passive:false});
 function focusCapital(){let r=state.regions.find(x=>x.id===state.capitalId);if(r){cam.x=r.slots[0].x;cam.z=r.slots[0].z}cam.yaw=0;cam.tilt=DEFAULT_CAMERA_TILT;dirtyLabels=true}
 $('camera-home').onclick=focusCapital;
 window.addEventListener('keydown',e=>{
+ if($('settings-panel').open)return;
  if(warAlerts.length){
   if(e.key==='Escape'){e.preventDefault?.();dismissWarAlert()}
   if(e.key==='Tab'){
@@ -7982,7 +8224,8 @@ window.addEventListener('keydown',e=>{
  if(e.key==='Escape'&&!$('council-month-report').hidden){$('council-month-close').onclick();return}
  if(e.key!=='Escape'&&['INPUT','SELECT','TEXTAREA'].includes(e.target?.tagName))return;
  if(e.key==='Escape'&&councilMapOrder){$('council-map-cancel').onclick();return}
- if (e.code==='KeyG' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !['INPUT','TEXTAREA','SELECT'].includes(e.target?.tagName) && state.started && !state.defeated && $('border-modal').hidden) {
+ const shortcut=e.ctrlKey||e.metaKey||e.altKey?undefined:gameSettings.actionFor(e.code);
+ if (shortcut==='muster' && !e.repeat && state.started && !state.defeated && $('border-modal').hidden) {
   setMusterOpen($('muster-panel').hidden); e.preventDefault?.(); return;
  }
  if(e.key==='Escape'&&!$('council-panel').hidden&&$('border-modal').hidden&&$('campaign-finale').hidden){showCouncil(false);return}
@@ -7993,8 +8236,16 @@ window.addEventListener('keydown',e=>{
  else if(selectedBuilding)closeBuilding();
  else if(state.selected)setSelected(null);
  else if(state.started){cameraKeys.clear();globalThis.gameShell?.pause()}
- return}if(e.key==='Home'){focusCapital();e.preventDefault?.();return}const n=Number(e.key);if(n>=1&&n<=6){selectMode(Object.keys(TYPES)[n-1]);return}if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyQ','KeyE','KeyR','KeyF'].includes(e.code)){cameraKeys.add(e.code);e.preventDefault?.()}});
-window.addEventListener('keyup',e=>cameraKeys.delete(e.code));window.addEventListener('blur',()=>{cameraKeys.clear();drag=null;$('selection-box').hidden=true});
+ return}
+ if(e.defaultPrevented||!shortcut)return;
+ if(shortcut==='capital'){focusCapital();e.preventDefault();return;}
+ if(Object.hasOwn(TYPES,shortcut)){if(!e.repeat)selectMode(shortcut);e.preventDefault();return;}
+ if(shortcut.startsWith('camera')||shortcut.startsWith('turn')||shortcut.startsWith('tilt')){cameraKeys.set(e.code,shortcut);e.preventDefault();}
+});
+window.addEventListener('keyup',e=>cameraKeys.delete(e.code));
+function clearCameraInput(){cameraKeys.clear();drag=null;$('selection-box').hidden=true;}
+window.addEventListener('blur',clearCameraInput);
+window.addEventListener('game-settings-open',clearCameraInput);
 $('defeat-restart').onclick=()=>$('reset').onclick();
 function resetGame(){
  campaignStartChoice=null;

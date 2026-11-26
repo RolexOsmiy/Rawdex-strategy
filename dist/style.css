@@ -3,9 +3,7 @@
 /* A restrained atlas palette, with information close to the related control. */
 .tool .icon{display:flex;align-items:center;justify-content:center;width:34px;height:32px;color:#e6d3a1}
 .tool .icon svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
-.tool-tip{display:none;position:absolute;z-index:12;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);width:225px;padding:14px;text-align:left;white-space:normal;background:#18221fee;border:1px solid #ac9768;box-shadow:0 8px 26px #10181499;pointer-events:none;font:12px/1.45 Arial,sans-serif;color:#e8e4d2}
-.tool-tip strong,.tool-tip span,.tool-tip small,.tool-tip em{display:block}.tool-tip strong{color:#efdaa3;font:normal 16px Georgia,serif;margin-bottom:6px}.tool-tip small{color:#bfcab2;font:11px/1.5 Arial;margin-top:7px}.tool-tip em{font:10px Arial;color:#d9bd80;border-top:1px solid #5a604a;padding-top:8px;margin-top:10px}.tool:hover .tool-tip,.tool:focus-visible .tool-tip{display:block}.tool:focus-visible{outline:2px solid #e4d18f;outline-offset:2px}
-@media(max-width:800px){.tool-tip{width:190px;font-size:11px}.tool:first-child .tool-tip{left:0;transform:none}.tool:last-child .tool-tip{left:auto;right:0;transform:none}}
+.tool:focus-visible{outline:2px solid #e4d18f;outline-offset:2px}
 
 #slot-markers{position:absolute;inset:0;pointer-events:none;z-index:2}
 .slot-marker{position:absolute;transform:translate(-50%,-50%);width:19px;height:19px;padding:0;border:1px solid #f1d88e;border-radius:50%;background:#18251fe8;color:#f7df9e;box-shadow:0 1px 5px #152019cc;display:grid;place-items:center;pointer-events:auto;font:bold 14px/1 Arial;cursor:pointer}
@@ -787,52 +785,6 @@ aside.duchy-card[hidden],.duchy-card [hidden]{display:none}
 @media(max-width:360px){.council-map-picker{gap:6px;padding:8px}}
 
 
-/* The goldwork and walnut texture are shared by both campaigns. */
-header{
- background:linear-gradient(180deg,#0e100c38 0%,#110d08aa 100%),url("ui/dark-walnut.webp") center/384px 72px;
- border-color:#82705a;
- box-shadow:0 4px 16px #100f0baa,inset 0 0 0 1px #d9b97825,inset 0 -2px #100d0a;
-}
-header::before{
- content:"";position:absolute;inset:2px;pointer-events:none;border:1px solid #a4875f38;border-radius:8px;
-}
-header .stat.treasury{
- background:linear-gradient(135deg,#b684422c,#140e0b80);border:1px solid #896b47;
- border-radius:7px;padding-inline:8px;color:#f6e7c6;
-}
-header .stat.treasury #gold-rate{color:#b8d7a5}
-header .stat.treasury #gold-rate[data-negative=true]{color:#f2ad9e}
-header .resource-bar{
- background:linear-gradient(180deg,#1a110947,#120e0b9e),url("ui/dark-walnut.webp") center/384px 72px;
- border:1px solid #a08058;border-radius:7px;
- box-shadow:inset 0 1px #dfc4934a,inset 0 -2px #130e0b;
-}
-header .resource-bar .resource{
- position:relative;border:0;border-right:1px solid #8d704c93;
- background:linear-gradient(145deg,#e7c18710,#07060528);color:#f5ead1;
-}
-header .resource-bar .resource:last-child{border-right:0}
-header .resource-bar .resource-switch:hover{background:#bb8a4544}
-header .resource-bar .resource-switch:focus-visible,header #treasury-summary:focus-visible{
- outline:2px solid #f1d499;outline-offset:-2px;
-}
-header .resource-values b{color:#f7edd6}
-header .resource-name,header .resource-policy,header .trade-fleet small{color:#e8d1a8}
-header .resource-bar .resource-values em{color:#bfd9a7}
-header .resource-bar .resource-values em.negative{color:#ffc0b2}
-header .resource-icon{
- width:27px;height:27px;flex:none;border:1px solid #ab895475;border-radius:8px;
- background:radial-gradient(ellipse at 50% 15%,#d4a86f49,transparent 68%),#1b130db8;
- box-shadow:inset 0 1px #f8db9e2b,0 1px 2px #100a08;
-}
-header .resource-icon .resource-art{width:23px;height:23px}
-header .resource-switch .resource-policy{display:none}
-header .resource-switch[aria-pressed=false]::after{
- content:"";position:absolute;top:4px;right:4px;width:4px;height:4px;border-radius:1px;transform:rotate(45deg);background:#e7b978;
-}
-header .resource-bar .resource-label{display:none}
-header button.subtle,header .notifications-toggle{border-color:#947654;background:#32261cd9;color:#f6e6c9}
-header button.subtle:hover,header .notifications-toggle:hover{background:#624929;border-color:#c39c62}
 .victory-rings{display:flex;align-items:center;gap:4px;flex:none;margin-left:3px}
 .victory-rings[hidden]{display:none}
 .victory-ring{
@@ -976,15 +928,6 @@ header button.subtle:hover,header .notifications-toggle:hover{background:#624929
 
 .domain-shortcut.domain-overloaded #lands{color:#ffae88}
 #domain-priority[aria-pressed="true"]{border-color:var(--brass);color:var(--brass)}
-/* Engraved command bar and semantic game values. */
-#app>header{
- background:linear-gradient(#150e0840,#0a08074a),url("ui/carved-toolbar.png") center/460px 100% repeat-x;
- border-color:#9d7950;
-}
-#app>header .brand{min-width:0;padding-inline:8px;flex:none}
-#app>header .brand>.crest{display:grid}
-#app>header .resource-bar{background:#241b12e8}
-.realm-power-board{top:50%;transform:translateY(-50%)}
 .victory-ring[data-victory-path="military"]{--victory-icon-color:#ff8a77}
 .victory-ring[data-victory-path="diplomacy"]{--victory-icon-color:#88ccff}
 .victory-ring[data-victory-path="trade"]{--victory-icon-color:#ffdb72}

@@ -324,6 +324,7 @@ async function verifyVictoryRings(page){
     document.getElementById('set-scale').dispatchEvent(new Event('change'));
     document.getElementById('set-fps').click();
    });
+   await page.locator('#settings-close').click();
    await page.waitForTimeout(2500);
    const msaa=await page.evaluate(()=>globalThis.mapGPU?.sampleCount??-1);
    const visiblePixels=await page.evaluate(async()=>{
@@ -355,10 +356,9 @@ async function verifyVictoryRings(page){
     await page.click('#setup-start');
     await page.waitForFunction(()=>!document.getElementById('app').classList.contains('campaign-setup'),{timeout:30000});
     const dateBefore=await page.evaluate(()=>document.getElementById('game-date')?.textContent);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(before=>document.getElementById('game-date')?.textContent!==before,dateBefore,{timeout:12000});
     const dateAfter=await page.evaluate(()=>document.getElementById('game-date')?.textContent);
-    sim=dateBefore!==dateAfter?'идёт ('+dateBefore+' → '+dateAfter+')':'СТОИТ';
-    await page.locator('#settings-close').click();
+    sim='идёт ('+dateBefore+' → '+dateAfter+')';
     await verifyBorderPaint(page);
     await verifyPoliticalBorders(page);
     console.log('Контуры держав видны, местность не перекрыта при перетаскивании, зуме и повороте.');

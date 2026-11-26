@@ -10,23 +10,38 @@ const GAME_AUDIO_CUES={
 };
 
 function createGameAudio(button){
+ const settings=globalThis.BALTIC_SETTINGS;
  const samples=new Map(),lastCue=new Map(),voices=new Set();
- let audio=null,master=null,ready=null,muted=false,generation=0,selectionRequest=0,selectionVoice=null;
- const canPlay=()=>!muted&&!document.hidden&&!globalThis.gameShell?.paused;
- function unlock(){
-  if(!canPlay()||!window.AudioContext)return;
+ const battleCues=new Set(['march','recruit','battle','capture','victory','defeat']);
+ let audio=null,master=null,channels=null,ready=null,generation=0,selectionRequest=0,selectionVoice=null;
+ let current=settings.current;
+ const canPlay=preview=>!current.muted&&current.volume>0&&!document.hidden&&(preview||!globalThis.gameShell?.paused);
+ function sync(next){
+  current=next;
+  button.setAttribute('aria-pressed',String(!current.muted));
+  button.title=current.muted?'Включить звуковые эффекты':'Выключить звуковые эффекты';
+  if(master){
+   master.gain.setTargetAtTime(current.muted?0:.8*current.volume/100,audio.currentTime,.015);
+   for(const name of Object.keys(channels))channels[name].gain.setTargetAtTime(current[name+'Volume']/100,audio.currentTime,.015);
+  }
+  if(current.muted||current.volume===0)stop();
+ }
+ function unlock(preview=false){
+  if(!canPlay(preview)||!window.AudioContext)return;
   if(!audio){
    try{
     audio=new AudioContext();
-    master=audio.createGain();master.gain.value=.80;master.connect(audio.destination);
+    master=audio.createGain();master.gain.value=.8*current.volume/100;master.connect(audio.destination);
+    channels={selection:audio.createGain(),world:audio.createGain(),battle:audio.createGain()};
+    for(const [name,channel] of Object.entries(channels)){channel.gain.value=current[name+'Volume']/100;channel.connect(master);}
    }catch{return}
   }
   if(audio.state!=='running'&&!ready){
    ready=audio.resume().catch(()=>{}).finally(()=>{ready=null});
   }
  }
- window.addEventListener('pointerdown',unlock,{capture:true,passive:true});
- window.addEventListener('keydown',unlock,{capture:true});
+ window.addEventListener('pointerdown',()=>unlock(),{capture:true,passive:true});
+ window.addEventListener('keydown',()=>unlock(),{capture:true});
 
  function stop(){
   generation++;
@@ -36,12 +51,10 @@ function createGameAudio(button){
  }
  document.addEventListener('visibilitychange',()=>{if(document.hidden)stop()});
  button.onclick=()=>{
-  muted=!muted;
-  button.setAttribute('aria-pressed',String(!muted));
-  button.title=muted?'Включить звуковые эффекты':'Выключить звуковые эффекты';
-  if(muted)stop();
-  else unlock();
+  settings.update({muted:!current.muted});
+  if(!current.muted)unlock();
  };
+ settings.onChange(sync);sync(current);
  function sampleFor(kind){
   if(!samples.has(kind)){
    const promise=fetch('audio/'+kind+'.mp3').then(response=>{
@@ -61,15 +74,16 @@ function createGameAudio(button){
   voice.gain.gain.setTargetAtTime(0,now,.025);
   voice.source.stop(now+.09);
  }
- async function play(kind,selection=false){
+ async function play(kind,selection=false,preview=false){
   const cue=GAME_AUDIO_CUES[kind];
-  if(!cue||!audio||!canPlay()||audio.state!=='running'&&!ready)return;
+  const channel=selection?'selection':battleCues.has(kind)?'battle':'world';
+  if(!cue||!audio||!canPlay(preview)||!current[channel+'Volume']||audio.state!=='running'&&!ready)return;
   const [volume,maxDuration,interval]=cue,now=audio.currentTime;
   if(now-(lastCue.get(kind)??-Infinity)<interval)return;
   lastCue.set(kind,now);
   const request=selection?++selectionRequest:0,epoch=generation;
   const [buffer]=await Promise.all([sampleFor(kind),ready]);
-  if(!buffer||!canPlay()||audio.state!=='running'||epoch!==generation||selection&&request!==selectionRequest)return;
+  if(!buffer||!canPlay(preview)||audio.state!=='running'||epoch!==generation||selection&&request!==selectionRequest)return;
   if(!selection&&voices.size>=4)return;
   const time=audio.currentTime,duration=Math.min(buffer.duration,maxDuration);
   if(selection&&selectionVoice)fadeOut(selectionVoice,time);
@@ -79,7 +93,7 @@ function createGameAudio(button){
   gain.gain.linearRampToValueAtTime(volume,time+Math.min(.045,duration*.2));
   gain.gain.setValueAtTime(volume,time+duration-Math.min(.19,duration*.4));
   gain.gain.linearRampToValueAtTime(0,time+duration);
-  source.connect(gain);gain.connect(master);
+  source.connect(gain);gain.connect(channels[channel]);
   voices.add(voice);
   if(selection)selectionVoice=voice;
   source.onended=()=>{
@@ -89,5 +103,5 @@ function createGameAudio(button){
   };
   source.start(time,0,duration);
  }
- return {play,select:kind=>play(kind,true),stop};
+ return {play,select:kind=>play(kind,true),stop,preview(){unlock(true);play('city',true,true);}};
 }

@@ -948,6 +948,8 @@ function gameDate(seconds){let days=Math.floor(Math.max(0,seconds||0)/SECONDS_PE
 // Campaign progress uses delivered cargo, current ownership and active treaties.
 const CAMPAIGN_PATHS = ['trade','military','diplomacy'];
 const CAMPAIGN_TRADE_WINDOW=240, CAMPAIGN_MARKET_WINDOW=90;
+const CAMPAIGN_MONTH=30*SECONDS_PER_GAME_DAY, ECONOMIC_SHARE=.51;
+const EMBARGO_DURATION=60, EMBARGO_COOLDOWN=300;
 const ENVOY_COST=35, ENVOY_DELAY=45, ALLIANCE_TRUST=60, HARBOR_CHARTER_COST=60;
 
 function initializeCampaign(state,map){
@@ -963,10 +965,11 @@ function initializeCampaign(state,map){
   rules:{partners,baseIncome,
    turnover:Math.round((mediterranean?3900:3000)*marketScale),repeatSales:2,
    stability:72,
-   allies:Math.min(3,rivals),tradeHold:180,tradeGrace:30,diplomaticHold:195,allianceAge:60,diplomaticCapitalLevel:2,minTime:180},
+   allies:rivals>=3?2:1,tradeHold:180,tradeGrace:30,diplomaticHold:195,allianceAge:60,diplomaticCapitalLevel:2,minTime:180},
   startingCapitals,
   trades:new Map(), turnover:new Map(), relations:new Map(), embassies:new Map(), pacts:new Map(),
-  holds:new Map(), progress:new Map(), embargoes:new Set(), pressure:null, result:null, exploring:false, charter:null
+  holds:new Map(), progress:new Map(), monthlyIncome:new Map(), embargoes:new Map(), counterEmbargoes:new Map(),
+  pressure:null, result:null, exploring:false, charter:null
  };
  updateCampaign(state,0);
 }
@@ -1064,6 +1067,24 @@ function campaignRecapFrame(recap,time){
 function campaignNationAlive(state,owner){
  return owner==='you'?state.started&&!state.defeated:tradePartnerAlive(state,owner);
 }
+function recordCampaignIncome(state,owner,amount){
+ const campaign=state.campaign,income=campaign?.monthlyIncome;
+ if(!income||campaign.result||!Number.isFinite(amount)||amount===0)return;
+ const time=state.economy.seconds;
+ const entries=income.get(owner)||[];
+ if(entries.at(-1)?.time===time)entries.at(-1).amount+=amount;
+ else entries.push({time,amount});
+ income.set(owner,entries);
+}
+function campaignMonthlyIncome(state,owner){
+ const entries=state.campaign.monthlyIncome.get(owner);
+ if(!entries)return 0;
+ const cutoff=state.economy.seconds-CAMPAIGN_MONTH;
+ const first=entries.findIndex(entry=>entry.time>cutoff);
+ if(first<0){entries.length=0;return 0;}
+ if(first>0)entries.splice(0,first);
+ return entries.reduce((total,entry)=>total+entry.amount,0);
+}
 function recordCampaignTrade(state,seller,buyer,value){
  const c=state.campaign;
  if(!c||seller===buyer||!(value>0))return;
@@ -1073,6 +1094,7 @@ function recordCampaignTrade(state,seller,buyer,value){
  c.trades.set(seller,sales);
  const turnover=c.turnover??=new Map();
  turnover.set(seller,(turnover.get(seller)||0)+value);
+ recordCampaignIncome(state,seller,value);
  const pair=warKey(seller,buyer),relation=c.relations.get(pair)||{trust:0,next:0};
  relation.trust=Math.min(100,relation.trust+12);
  c.relations.set(pair,relation);
@@ -1095,6 +1117,28 @@ function campaignRelation(state,other,owner='you'){
 function campaignEmbassy(state,other,owner='you'){
  const regionId=state.campaign?.embassies?.get(owner+'>'+other);
  return regionId==null?null:state.regions.find(region=>region.id===regionId&&region.owner===other)||null;
+}
+function campaignFrontiers(state){
+ const byId=new Map(state.regions.map(region=>[region.id,region]));
+ const living=new Set(state.started&&!state.defeated?['you']:[]);
+ for(const [owner,faction] of Object.entries(state.factions||{})){
+  const seat=byId.get(faction.regionId);
+  if(!faction.defeated&&!faction.isRebel&&seat?.owner===owner&&seat.buildings?.some(building=>building.type==='city'))living.add(owner);
+ }
+ const neighbors=new Map([...living].map(owner=>[owner,new Set()]));
+ for(const region of state.regions){
+  if(!living.has(region.owner))continue;
+  for(const id of region.adj||[]){
+   const other=byId.get(id)?.owner;
+   if(other===region.owner||!living.has(other))continue;
+   neighbors.get(region.owner).add(other);
+   neighbors.get(other).add(region.owner);
+  }
+ }
+ return neighbors;
+}
+function regionalPactHasFrontier(frontiers,a,b,against){
+ return a!==against&&b!==against&&!!frontiers.get(a)?.has(b)&&frontiers.get(a).has(against)&&!!frontiers.get(b)?.has(against);
 }
 function campaignAllies(state,owner){
  return [...(state.campaign?.pacts.values()||[])]
@@ -1127,16 +1171,24 @@ function sendCampaignEnvoy(state,other){
  state.campaign.relations.set(pair,{trust:Math.min(100,relation.trust+30),next:state.economy.seconds+ENVOY_DELAY});
  return {ok:true};
 }
-function campaignAllianceCheck(state,a,b,coalitionAgainst=null){
+function campaignAllianceCheck(state,a,b,coalitionAgainst=null,frontiers=campaignFrontiers(state)){
  const c=state.campaign;
  if(!c||a===b||!campaignNationAlive(state,a)||!campaignNationAlive(state,b)||isAtWar(state,a,b))
   return {ok:false,reason:'Союз недоступен'};
  if(c.pacts.has(warKey(a,b)))return {ok:false,reason:'Союз уже заключён'};
- if(coalitionAgainst)return {ok:true};
- if(campaignRelation(state,b,a).trust<ALLIANCE_TRUST)return {ok:false,reason:'Нужно '+ALLIANCE_TRUST+' доверия'};
+ if(!frontiers.get(a)?.has(b))return {ok:false,reason:'Для союза нужна общая граница'};
  const enemies=owner=>Object.keys(state.wars||{}).filter(key=>key.split('|').includes(owner)).map(key=>key.split('|').find(id=>id!==owner));
  if(enemies(a).some(e=>campaignAllies(state,b).includes(e))||enemies(b).some(e=>campaignAllies(state,a).includes(e)))
   return {ok:false,reason:'У державы есть союз с вашим противником'};
+ if(coalitionAgainst){
+  if(!regionalPactHasFrontier(frontiers,a,b,coalitionAgainst)||campaignAllies(state,a).includes(coalitionAgainst)||campaignAllies(state,b).includes(coalitionAgainst))
+   return {ok:false,reason:'Нужен общий соперник на границе'};
+  if([...c.pacts.values()].some(p=>p.against&&[p.a,p.b].some(owner=>owner===a||owner===b)))
+   return {ok:false,reason:'Держава уже участвует в региональном союзе'};
+  return {ok:true};
+ }
+ if(a!=='you'&&b!=='you')return {ok:false,reason:'Нужен общий соперник на границе'};
+ if(campaignRelation(state,b,a).trust<ALLIANCE_TRUST)return {ok:false,reason:'Нужно '+ALLIANCE_TRUST+' доверия'};
  const partner=a==='you'?b:a;
  if(a==='you'||b==='you'){
   const blocks=[...c.pacts.values()].some(p=>p.against==='you'&&(p.a===partner||p.b===partner));
@@ -1151,8 +1203,21 @@ function formCampaignAlliance(state,a,b,against=null){
  state.onCampaignPact?.(a,b,against);
  return {ok:true};
 }
+function campaignEmbargoStatus(state,a,b){
+ const order=state.campaign?.embargoes?.get(warKey(a,b)),now=state.economy?.seconds||0;
+ return {by:order?.by,remaining:Math.max(0,(order?.until??0)-now),cooldown:Math.max(0,(order?.reopens??0)-now)};
+}
 function campaignTradeEmbargo(state,a,b){
- return state.campaign?.embargoes?.has(warKey(a,b))??false;
+ return (state.campaign?.embargoes?.get(warKey(a,b))?.until??0)>(state.economy?.seconds||0);
+}
+function setCampaignEmbargo(state,owner,target){
+ const campaign=state.campaign,now=state.economy?.seconds||0;
+ if(!campaign||owner===target||!campaignNationAlive(state,owner)||!campaignNationAlive(state,target)||isAtWar(state,owner,target))return null;
+ const key=warKey(owner,target),status=campaignEmbargoStatus(state,owner,target);
+ if(status.remaining&&status.by===owner){campaign.embargoes.get(key).until=now;return {active:false};}
+ if(status.cooldown)return null;
+ campaign.embargoes.set(key,{by:owner,until:now+EMBARGO_DURATION,reopens:now+EMBARGO_COOLDOWN});
+ return {active:true};
 }
 function breakCampaignAlliance(state,other){
  const c=state.campaign,key=warKey('you',other);
@@ -1181,15 +1246,23 @@ function updateCampaign(state,dt,captureId=null){
  const owners=[...(state.defeated?[]:['you']),...Object.entries(state.factions).filter(([id,f])=>!f.defeated&&!f.isRebel&&
   regionByOwner.get(id)?.some(r=>r.id===f.regionId&&r.buildings.some(b=>b.type==='city'))).map(([id])=>id)];
  const nationSet=new Set(owners);
+ const financials=new Map(owners.map(owner=>[owner,{
+  gold:Math.max(0,factionLedger(state,owner)?.gold||0),monthlyIncome:campaignMonthlyIncome(state,owner)
+ }]));
+ const totalGold=[...financials.values()].reduce((sum,account)=>sum+account.gold,0);
+ const totalIncome=[...financials.values()].reduce((sum,account)=>sum+Math.max(0,account.monthlyIncome),0);
  const alliesByOwner=new Map(owners.map(id=>[id,[]]));
+ const frontiers=c.pacts.size?campaignFrontiers(state):null;
  for(const [key,pact] of c.pacts){
-  if(!nationSet.has(pact.a)||!nationSet.has(pact.b)||isAtWar(state,pact.a,pact.b)){c.pacts.delete(key);continue}
+  if(!nationSet.has(pact.a)||!nationSet.has(pact.b)||isAtWar(state,pact.a,pact.b)||
+   pact.against&&!regionalPactHasFrontier(frontiers,pact.a,pact.b,pact.against)){c.pacts.delete(key);continue}
   const matureAt=(pact.since??-Infinity)+rules.allianceAge;
   alliesByOwner.get(pact.a).push({owner:pact.b,matureAt});
   alliesByOwner.get(pact.b).push({owner:pact.a,matureAt});
  }
  const cap=(n,max)=>max>0?Math.min(1,n/max):0;
  const requiredCapitals=c.startingCapitals.size;
+ const requiredAllies=Math.min(rules.allies,owners.length-1);
  let leader=null,pressure=null,winner=null;
  const pathLeaders={},threats={},previousProgress=c.progress;
  c.progress=new Map();
@@ -1212,10 +1285,15 @@ function updateCampaign(state,dt,captureId=null){
   const besieged=!!home&&state.sieges?.has(home.id)&&state.sieges.get(home.id).status!=='abandoned';
   const stability=home?duchyStability(home,guards.get(home.id)):0;
   const peaceful=!!home&&!besieged&&stability>=rules.stability;
-  const requiredPartners=rules.partners;
-  const requiredIncome=Math.round(rules.baseIncome*(.22+.26*requiredPartners));
-  const eligibleTrade=requiredPartners>0&&repeatBuyers.length>=requiredPartners&&income>=requiredIncome&&turnover>=rules.turnover;
-  const eligibleDiplomacy=allies.length>=rules.allies&&peaceful&&homeLevel>=rules.diplomaticCapitalLevel;
+  const requiredPartners=Math.min(rules.partners,owners.length-1);
+  const requiredIncome=Math.round(rules.baseIncome*(.22+.26*rules.partners));
+  const {gold,monthlyIncome}=financials.get(owner);
+  const rivalGold=totalGold-gold,rivalIncome=totalIncome-Math.max(0,monthlyIncome);
+  const requiredGold=Math.max(1,Math.ceil(rivalGold*ECONOMIC_SHARE-1e-8));
+  const requiredMonthlyIncome=Math.max(1,Math.ceil(rivalIncome*ECONOMIC_SHARE-1e-8));
+  const eligibleTrade=requiredPartners>0&&repeatBuyers.length>=requiredPartners&&income>=requiredIncome&&turnover>=rules.turnover&&
+   gold+1e-8>=requiredGold&&monthlyIncome+1e-8>=requiredMonthlyIncome;
+  const eligibleDiplomacy=requiredAllies>0&&allies.length>=requiredAllies&&peaceful&&homeLevel>=rules.diplomaticCapitalLevel;
   const heldFor=c.holds.get(owner)||{trade:0,diplomacy:0,tradeInterrupted:0};
   if(eligibleTrade){
    heldFor.trade=Math.min(rules.tradeHold,heldFor.trade+dt);
@@ -1227,16 +1305,17 @@ function updateCampaign(state,dt,captureId=null){
   heldFor.diplomacy=eligibleDiplomacy?Math.min(rules.diplomaticHold,heldFor.diplomacy+dt):0;
   c.holds.set(owner,heldFor);
   const paths={
-   trade:{buyers,repeatBuyers,income,turnover,requiredPartners,requiredIncome,held:heldFor.trade,ready:eligibleTrade&&heldFor.trade>=rules.tradeHold,
+   trade:{buyers,repeatBuyers,income,turnover,requiredPartners,requiredIncome,gold,monthlyIncome,rivalGold,rivalIncome,requiredGold,requiredMonthlyIncome,
+    margin:Math.min(gold/requiredGold,monthlyIncome/requiredMonthlyIncome),held:heldFor.trade,ready:eligibleTrade&&heldFor.trade>=rules.tradeHold,
     eligible:eligibleTrade,remaining:Math.max(0,rules.tradeHold-heldFor.trade,rules.minTime-now),
     blockedFor:eligibleTrade||!heldFor.trade?0:Math.max(0,rules.tradeGrace-(heldFor.tradeInterrupted||0)),
-    score:.12*cap(buyers.length,requiredPartners)+.25*cap(repeatBuyers.length,requiredPartners)+
-     .25*cap(income,requiredIncome)+.23*cap(turnover,rules.turnover)+.15*cap(heldFor.trade,rules.tradeHold)},
+    score:.14*cap(repeatBuyers.length,requiredPartners)+.14*cap(income,requiredIncome)+.14*cap(turnover,rules.turnover)+
+     .22*cap(gold,requiredGold)+.20*cap(Math.max(0,monthlyIncome),requiredMonthlyIncome)+.16*cap(heldFor.trade,rules.tradeHold)},
    military:{held,holdsOwn,requiredCapitals,ready:requiredCapitals>1&&held.length===requiredCapitals,
     score:requiredCapitals>1?cap(held.length,requiredCapitals):0},
-   diplomacy:{allies,activeAlliances,peaceful,stability,besieged,homeLevel,held:heldFor.diplomacy,ready:heldFor.diplomacy>=rules.diplomaticHold,
+   diplomacy:{allies,activeAlliances,requiredAllies,peaceful,stability,besieged,homeLevel,held:heldFor.diplomacy,ready:heldFor.diplomacy>=rules.diplomaticHold,
     eligible:eligibleDiplomacy,remaining:Math.max(0,rules.diplomaticHold-heldFor.diplomacy,rules.minTime-now),
-    score:.70*cap(allies.length,rules.allies)+.06*Number(peaceful)+.09*Number(homeLevel>=rules.diplomaticCapitalLevel)+.15*cap(heldFor.diplomacy,rules.diplomaticHold)}
+    score:.70*cap(allies.length,requiredAllies)+.06*Number(peaceful)+.09*Number(homeLevel>=rules.diplomaticCapitalLevel)+.15*cap(heldFor.diplomacy,rules.diplomaticHold)}
   };
   c.progress.set(owner,paths);
   for(const path of CAMPAIGN_PATHS){
@@ -1255,7 +1334,8 @@ function updateCampaign(state,dt,captureId=null){
    }
    if(paths[path].ready){
     if(path==='military')winner={...entry,regionId:captureId};
-    else if(!winner&&!state.defeated&&now>=rules.minTime)winner=entry;
+    else if(!state.defeated&&now>=rules.minTime&&(!winner||path==='trade'&&winner.path==='trade'&&
+     paths.trade.margin>c.progress.get(winner.owner).trade.margin))winner=entry;
    }
   }
  }
@@ -1820,6 +1900,7 @@ function payRealmUpkeep(state,owner,regions,dt,guards){
  }
  const cash=Math.max(0,ledger.gold)+taxes;
  ledger.gold=Math.max(0,cash-upkeep);
+ recordCampaignIncome(state,owner,taxes-upkeep);
  return {due:upkeep,unpaid:Math.max(0,upkeep-cash)};
 }
 function updateRealmFinances(state,owner,regions,dt,payroll,councilPayroll,reparations={due:0,unpaid:0}){
@@ -2921,7 +3002,10 @@ function declareWar(state,other,attacker='you',defensive=false){
  const check=warDeclarationCheck(state,other,attacker);
  if(!check.ok)return check;
  state.wars??={};
- const defenders=defensive?[]:campaignAllies(state,other);
+ const defenders=defensive?[]:campaignAllies(state,other).filter(ally=>{
+  const target=state.campaign.pacts.get(warKey(ally,other))?.against;
+  return !target||target===attacker;
+ });
  const key=warKey(attacker,other);
  state.wars[key]=true;
  (state.warRecords??={})[key]=createWarRecord(state,attacker,other);
@@ -3042,9 +3126,13 @@ function payWarReparations(state,dt){
    credits.set(treaty.recipient,(credits.get(treaty.recipient)||0)+paid);
   }
   ledger.gold=Math.max(0,ledger.gold-total*fraction);
+  recordCampaignIncome(state,owner,-total*fraction);
   payroll.set(owner,bill);
  }
- for(const [owner,paid] of credits)factionLedger(state,owner).gold+=paid;
+ for(const [owner,paid] of credits){
+  factionLedger(state,owner).gold+=paid;
+  recordCampaignIncome(state,owner,paid);
+ }
  return payroll;
 }
 function armySelectionVassal(state,selection){
@@ -3275,6 +3363,7 @@ function creditRealmTrade(state,ship,seller,buyer){
   const toll=ship.value*.15;
   ship.realmToll=toll-shareVassalGold(vassalFor(state,destination),toll);
   buyer.gold+=ship.realmToll;
+  recordCampaignIncome(state,ship.buyer,ship.realmToll);
   if(ship.buyer!=='you')buyer.tradeTax=(buyer.tradeTax||0)+ship.realmToll;
  }
 }
@@ -3518,7 +3607,8 @@ function vassalExpand(state,vassal,owner,lands){
  if(vassal.gold<PETITION_COST+180)return;
  if(vassal.lands.length>=vassalTierInfo(vassal).capacity)return;
  if(state.economy.shipments.some(ship=>ship.kind==='petition'&&ship.vassalId===vassal.id))return;
- const frontier=state.regions.filter(r=>r.owner==='neutral'&&lands.some(land=>land.adj.includes(r.id)||r.adj.includes(land.id)));
+ const candidates=owner!=='you'&&state.rankBotExpansion?state.rankBotExpansion(owner).map(({region})=>region):state.regions;
+ const frontier=candidates.filter(r=>r.owner==='neutral'&&lands.some(land=>land.adj.includes(r.id)||r.adj.includes(land.id)));
  if(!frontier.length)return;
  const region=frontier[0];
  const q=petitionFor(region);
@@ -4103,7 +4193,7 @@ function finishBotSeaTrade(state,ship){
  const seller=factionLedger(state,ship.owner), buyer=factionLedger(state,ship.buyer);
  const port=state.regions.find(r=>r.id===ship.destinationPortRegionId);
  if(!seller||seller.defeated) return;
- if(!buyer||!campaignNationAlive(state,ship.buyer)||(ship.mode==='sea'&&port?.owner!==ship.buyer)||isAtWar(state,ship.owner,ship.buyer)){
+ if(!buyer||!campaignNationAlive(state,ship.buyer)||(ship.mode==='sea'&&port?.owner!==ship.buyer)||isAtWar(state,ship.owner,ship.buyer)||campaignTradeEmbargo(state,ship.owner,ship.buyer)){
   // Return unsold stock if the destination market changed hands.
   for(const [good,amount] of Object.entries(ship.cargo)) seller.stocks[good]+=amount;
   return;
@@ -4132,6 +4222,13 @@ function stepEconomy(state,dt){if(!state.started||state.defeated||(state.campaig
  for(let i=e.shipments.length-1;i>=0;i--){
   const ship=e.shipments[i];
   if(ship.kind==='export'&&!timed('exportDest',()=>ensureExportDestination(state,ship))){returnTradeShipment(state,ship);continue}
+  if(ship.kind==='import'&&campaignTradeEmbargo(state,shipmentOwner(ship),ship.seller)){
+   const owner=shipmentOwner(ship),vassal=vassalById(state,ship.vassalId,owner);
+   const buyer=factionLedger(state,owner,vassal),seller=factionLedger(state,ship.seller);
+   if(buyer){buyer.gold+=ship.value;if(ship.vassalId==null)recordCampaignIncome(state,owner,ship.value);}
+   if(seller)seller.stocks[ship.good]=(seller.stocks[ship.good]||0)+ship.amount;
+   e.shipments.splice(i,1);continue;
+  }
   if(ship.kind==='petition'){
    const target=state.regions.find(region=>region.id===ship.targetId);
    if(target?.owner!=='neutral')turnSettlersHome(state,ship,target);
@@ -4198,7 +4295,7 @@ function stepEconomy(state,dt){if(!state.started||state.defeated||(state.campaig
  const vassal=vassalById(state,ship.vassalId,owner);
  if(vassal)creditVassalGoods(state,councilRegion(state,merchantHomeId(state,ship),owner),vassal,ship.good,ship.amount);
  else if(buyer)creditRealmCargo(state,owner,{[ship.good]:ship.amount});
- if(seller)seller.gold+=ship.value;
+ if(seller){seller.gold+=ship.value;recordCampaignIncome(state,ship.seller,ship.value);}
  }else if(e.granaries&&isGranaryShipment(ship)){
   if(!finishGranaryShipment(state,ship)){
    if(redirectSupplyToCapital(state,ship)){
@@ -4306,6 +4403,7 @@ function stepEconomy(state,dt){if(!state.started||state.defeated||(state.campaig
  const reparations=payWarReparations(state,dt);
  for(const [owner,upkeep] of upkeepBills){
   const councilPay=stepCouncilTasks(state,dt,owner);
+  recordCampaignIncome(state,owner,-councilPay.due);
   updateRealmFinances(state,owner,realmLands.get(owner),dt,upkeep,councilPay,reparations.get(owner));
  }
  const t3=Date.now();mark('upkeep',t2,t3);

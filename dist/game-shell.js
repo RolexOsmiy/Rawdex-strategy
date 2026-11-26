@@ -10,7 +10,9 @@
  const requested=params.get('map');
  const map=Object.hasOwn(maps,requested)?requested:'baltic';
  const directlyToMap=Object.hasOwn(maps,requested)||params.has('start')||params.has('region');
- let screen='home',back='home',pauseFocus=null,loading=null,version=0,deadline;
+ let screen='home',pauseFocus=null,loading=null,version=0,deadline;
+ const settingsMenu=createSettingsMenu();
+ globalThis.gameAudio=createGameAudio(get('feedback-sound'));
 
  function focus(element){element?.focus?.({preventScroll:true})}
  function show(next,target){
@@ -44,8 +46,8 @@
  function afterPaint(work){requestAnimationFrame(()=>requestAnimationFrame(work))}
 
  const api={
-  get paused(){return screen==='pause'||screen==='exit'||screen==='help'&&back==='pause'},
-  get playing(){return screen==='game'},
+  get paused(){return screen==='pause'||screen==='exit'||screen==='game'&&settingsMenu.open},
+  get playing(){return screen==='game'&&!settingsMenu.open},
   progress,
   fail,
   pause(){
@@ -85,11 +87,10 @@
  };
  globalThis.gameShell=api;
 
- for(const id of ['front-loading-title','front-maps-title','front-help-title','setup-heading','world'])get(id).tabIndex=-1;
+ for(const id of ['front-loading-title','front-maps-title','setup-heading','world'])get(id).tabIndex=-1;
  function resume(){show('game');focus(pauseFocus||get('game-menu-toggle'));pauseFocus=null;}
  function goBack(){
   if(screen==='maps'){show('home','front-play');return}
-  if(screen==='help'){show(back,back==='pause'?'front-resume':'front-play');return}
   if(screen==='exit'){show('pause','front-exit');return}
   if(screen==='pause')resume();
  }
@@ -104,11 +105,8 @@
  get('front-exit').onclick=()=>show('exit','front-stay');
  get('front-stay').onclick=goBack;
  for(const button of shell.querySelectorAll('[data-front-back]'))button.onclick=goBack;
- for(const button of shell.querySelectorAll('[data-front-help]'))button.onclick=()=>{
-  back=screen;show('help','front-help-title');
- };
  window.addEventListener('keydown',event=>{
-  if(screen==='game'||event.key==='F11'&&native?.close)return;
+  if(settingsMenu.open||screen==='game'||event.key==='F11'&&native?.close)return;
   event.stopImmediatePropagation();
   if(event.key==='Escape'){
    if(screen!=='loading'){event.preventDefault();goBack()}
@@ -144,68 +142,6 @@
   link.append(text);
   mapGrid.append(link);
  }
- function initSettingsUI(){
-  const settings=globalThis.BALTIC_SETTINGS;
-  if(!settings)return;
-  const panel=get('settings-panel'),toggle=get('settings-toggle');
-  if(!panel||!toggle)return;
-  const i18n=text=>globalThis.gameI18n?.text(text)??text;
-  for(const [id,key] of [['settings-title','Настройки'],['settings-label-fullscreen','Полный экран'],['settings-label-fps','Счётчик FPS'],['settings-label-msaa','Сглаживание (MSAA)'],['settings-label-scale','Масштаб рендера'],['settings-reset','Сбросить настройки']]){
-   const element=get(id);if(element)element.textContent=i18n(key);
-  }
-  toggle.title=i18n('Настройки графики и окна');toggle.setAttribute('aria-label',toggle.title);
-  const controls={fullscreen:get('set-fullscreen'),fps:get('set-fps'),msaa:get('set-msaa'),scale:get('set-scale')};
-  const gpuInfo=get('settings-gpu-info');
-  const isFullscreen=()=>settings.hasNative?!!settings.current.fullscreen:!!document.fullscreenElement;
-  const sync=()=>{
-   const current=settings.current;
-   controls.fps.checked=!!current.fpsCounter;
-   controls.msaa.checked=current.msaa!==false;
-   controls.scale.value=String(current.renderScale);
-   controls.fullscreen.checked=isFullscreen();
-   const adapter=globalThis.mapGPU?.adapterInfo;
-   if(adapter){
-    const name=adapter.description||[adapter.vendor,adapter.architecture].filter(Boolean).join(' · ');
-    gpuInfo.textContent=i18n('Графика: {0}',name||'?');
-    gpuInfo.dataset.software=adapter.isFallbackAdapter||/swiftshader|llvmpipe/i.test(name)?'1':'0';
-   }
-  };
-  const open=show=>{panel.hidden=!show;toggle.setAttribute('aria-pressed',String(show));if(show)sync()};
-  toggle.onclick=()=>open(panel.hidden);
-  get('settings-close').onclick=()=>open(false);
-  const setFullscreen=async on=>{
-   try{
-    if(settings.hasNative){
-     const actual=await native.setFullscreen(on);
-     if(typeof actual==='boolean')settings.update({fullscreen:actual});
-    }else if(on)await document.documentElement.requestFullscreen?.();
-    else await document.exitFullscreen?.();
-   }finally{
-    if(!panel.hidden)sync();
-   }
-  };
-  controls.fullscreen.onchange=()=>setFullscreen(controls.fullscreen.checked).catch(console.warn);
-  controls.fps.onchange=()=>settings.update({fpsCounter:controls.fps.checked});
-  controls.msaa.onchange=()=>settings.update({msaa:controls.msaa.checked});
-  controls.scale.onchange=()=>settings.update({renderScale:Number(controls.scale.value)||1});
-  get('settings-reset').onclick=()=>{
-   settings.reset();sync();
-   if(isFullscreen()!==settings.defaultFullscreen)setFullscreen(settings.defaultFullscreen).catch(console.warn);
-  };
-  settings.onChange(()=>{if(!panel.hidden)sync()});
-  if(!settings.hasNative){
-   document.addEventListener('fullscreenchange',()=>{if(!panel.hidden)sync()});
-  }
-  if(native?.close)window.addEventListener('keydown',event=>{
-   if(event.key!=='F11')return;
-   event.preventDefault();
-   if(!event.repeat)settings.ready.then(()=>setFullscreen(!isFullscreen())).catch(console.warn);
-  },true);
-  window.addEventListener('keydown',event=>{
-   if(event.key!=='Escape'||panel.hidden)return;
-   event.preventDefault();event.stopImmediatePropagation();open(false);
-  },true);
- }
  if(directlyToMap){
   const attempt=begin('map',maps[map].title,'Загружаем карту');
   afterPaint(()=>{
@@ -213,5 +149,4 @@
    globalThis.loadCampaign(maps[map],progress).catch(error=>{if(attempt===version)fail(error.message)});
   });
  }
- initSettingsUI();
 })();

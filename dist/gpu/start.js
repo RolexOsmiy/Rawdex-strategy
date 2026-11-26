@@ -28,7 +28,7 @@ async function startMapGraphics(){
  }
  globalThis.gameShell?.progress(70,'Загружаем движок отрисовки');
  const [,shaders]=await Promise.all([loadGameScript('vendor/pixi-8.14.3.min.js'),
-  fetch('gpu/shaders.json').then(response=>{
+  fetch('gpu/shaders.json?v='+(globalThis.__gameScriptStamp||Date.now())).then(response=>{
    if(!response.ok)throw Error('Не удалось загрузить материалы карты.');
    return response.json();
   })]);
