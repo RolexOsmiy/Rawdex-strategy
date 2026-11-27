@@ -7,8 +7,8 @@ globalThis.__gameScriptStamp=GAME_SCRIPT_STAMP;
 globalThis.loadCampaign = async (entry, progress) => {
  const folder=entry.folder;
  const extras=[...(entry.extras||[])];
- const data=['map-data.js','terrain-mesh.js','terrain-relief.js','parcel-data.js','road-data.js'].map(file=>folder+file);
- const files=[...extras,...data,'logic.js','transport.js','strategy.js','gpu/map-renderer.js'];
+ const data=['map-data.js','terrain-mesh.js','terrain-relief.js','parcel-data.js','road-data.js','river-data.js'].map(file=>folder+file);
+ const files=[...extras,...data,'logic.js','transport.js','strategy.js','rivers.js','diplomatic-atlas.js','gpu/map-renderer.js'];
  function load(path){
   return new Promise((resolve,reject)=>{
    const tag=document.createElement('script');

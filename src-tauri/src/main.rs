@@ -139,10 +139,24 @@ fn main() {
             let fullscreen = settings.settings.lock().unwrap().fullscreen;
             app.manage(settings);
 
-            WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
+            let window = WebviewWindowBuilder::from_config(app, &app.config().app.windows[0])?
                 .fullscreen(fullscreen)
                 .initialization_script(include_str!("native-settings.js"))
                 .build()?;
+
+            #[cfg(windows)]
+            window.with_webview(|webview| {
+                let result = unsafe {
+                    webview
+                        .controller()
+                        .CoreWebView2()
+                        .and_then(|view| view.Settings())
+                        .and_then(|settings| settings.SetAreDefaultContextMenusEnabled(false))
+                };
+                if let Err(error) = result {
+                    eprintln!("Не удалось отключить контекстное меню WebView2: {error}");
+                }
+            })?;
             Ok(())
         })
         .run(tauri::generate_context!())

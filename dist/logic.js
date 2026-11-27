@@ -152,7 +152,8 @@ function buildingSiteCheck(state,type,x,z,projectId=null,owner='you'){
  const plans=getRealmCouncil(state,owner)?.projects||[];
  if(plans.some(p=>p.id!==projectId&&p.regionId===r.id&&p.slotId===slot.id))return {ok:false,reason:'Графство зарезервировано Советом',r,slot};
  if(type==='port'){
-  if(!r.coast)return {ok:false,reason:'Порт нужен на побережье',r,slot};
+  if(state.portSite?!state.portSite(r,slot):!r.coast)
+   return {ok:false,reason:'Нужен участок у моря или судоходной реки',r,slot};
   if(r.buildings.some(b=>b.type==='port')||plans.some(p=>p.id!==projectId&&p.regionId===r.id&&p.type==='port'))
    return {ok:false,reason:'В герцогстве уже есть порт или план его стройки',r,slot};
  }
@@ -667,7 +668,7 @@ function councilEconomyPlan(state,region,budget,{income=0,seconds=0,maximum=budg
    Math.max(0,(g==='grain'?national[g]-local.grainNeed:national[g]-internal[g])+((stocks[g]||0)-(TRADE_RESERVE[g]||0))/4)
  ]));
  const evaluateHub=book=>GOODS.reduce((n,g)=>n+Math.min(surplus[g],book?.[g]?.units||0)*(book?.[g]?.price||0),0);
- if(constructionRoom>0&&region.coast&&ceiling+1e-8>=TYPES.port.cost){
+ if(constructionRoom>0&&ceiling+1e-8>=TYPES.port.cost){
   const berth=councilSite(state,region,'port',owner);
   if(berth.ok&&Object.values(surplus).some(n=>n>=8)){
    const harbor=state.councilPortOutlook?.(region,berth.slot,!!purse?.vassalId);
@@ -3183,6 +3184,17 @@ function battleCombatants(state){let result=[];for(const r of state.regions){let
 // Each battle combines all nearby armies of the two countries. Reinforcements
 // join the existing battle as soon as they reach its position.
 function battleLosses(side,amount){let total=side.reduce((n,e)=>n+e.unit.troops,0);amount=Math.min(total,amount);if(!total||!amount)return 0;let allocations=side.map((e,i)=>{let exact=amount*e.unit.troops/total;return {e,i,n:Math.floor(exact),fraction:exact-Math.floor(exact)}}),remaining=amount-allocations.reduce((n,x)=>n+x.n,0);allocations.sort((a,b)=>b.fraction-a.fraction||a.i-b.i);for(let i=0;i<remaining;i++)allocations[i].n++;for(const x of allocations)x.e.unit.troops-=x.n;return amount}
+function bridgeCover(state,side,total,moving){
+ if(!state.bridgeAt||!total)return {factor:1,bridge:null};
+ let held=0,bridge=null;
+ for(const {unit,point} of side){
+  if(moving.has(unit))continue;
+  const position=state.bridgeAt(point);
+  if(!position)continue;
+  bridge??=position;held+=unit.troops;
+ }
+ return {factor:1-(state.bridgeDefense||0)*held/total,bridge};
+}
 // Idle armies beside their own city take up defensive positions in it.
 const AUTO_GARRISON_RADIUS=8,AUTO_GARRISON_DELAY=3;
 function stepAutoGarrison(state){
@@ -3207,7 +3219,7 @@ function stepBattles(state,dt){const armies=battleCombatants(state),previous=sta
  function collect(battle){let A=[],B=[];for(const candidate of armies){if(used.has(candidate.unit)||distance(candidate.point,battle.point)>9)continue;if(candidate.unit.owner===battle.ownerA)A.push(candidate);else if(candidate.unit.owner===battle.ownerB)B.push(candidate)}if(!A.length||!B.length)return false;for(const a of [...A,...B])used.add(a.unit);battle.sideA=A;battle.sideB=B;battle.a=A[0].unit;battle.b=B[0].unit;return true}
  for(const old of previous)if(isAtWar(state,old.ownerA,old.ownerB)&&collect(old))battles.push(old);
  for(let i=0;i<armies.length;i++)for(let j=i+1;j<armies.length;j++){let a=armies[i],b=armies[j];if(used.has(a.unit)||used.has(b.unit)||!isAtWar(state,a.unit.owner,b.unit.owner)||distance(a.point,b.point)>9)continue;let battle={ownerA:a.unit.owner,ownerB:b.unit.owner,point:{x:(a.point.x+b.point.x)/2,z:(a.point.z+b.point.z)/2},lossA:0,lossB:0,carryA:0,carryB:0};if(collect(battle)){battles.push(battle);state.onBattleChanged?.({kind:'start',a:battle.a,b:battle.b,battle})}}
- const active=[];for(const battle of battles){const power=x=>{let level=1;if(x.garrison){const region=state.armyTerritoryAt?.(x.point);level=region?duchySeat(region)?.level||1:1}return x.unit.troops*(x.garrison?1.15+(level-1)*.12:1)};let A=battle.sideA,B=battle.sideB,totalA=A.reduce((n,x)=>n+x.unit.troops,0),totalB=B.reduce((n,x)=>n+x.unit.troops,0),attackA=A.reduce((n,x)=>n+power(x),0),attackB=B.reduce((n,x)=>n+power(x),0);for(const x of [...A,...B])x.unit.inBattle=true;let ca=battle.carryA+attackB*.05*dt,cb=battle.carryB+attackA*.05*dt,la=Math.min(totalA,Math.floor(ca)),lb=Math.min(totalB,Math.floor(cb));battle.carryA=ca-la;battle.carryB=cb-lb;battle.lossA+=battleLosses(A,la);battle.lossB+=battleLosses(B,lb);
+ const active=[],moving=new Set(state.armyMoves||[]);for(const battle of battles){const power=x=>{let level=1;if(x.garrison){const region=state.armyTerritoryAt?.(x.point);level=region?duchySeat(region)?.level||1:1}return x.unit.troops*(x.garrison?1.15+(level-1)*.12:1)};let A=battle.sideA,B=battle.sideB,totalA=A.reduce((n,x)=>n+x.unit.troops,0),totalB=B.reduce((n,x)=>n+x.unit.troops,0),attackA=A.reduce((n,x)=>n+power(x),0),attackB=B.reduce((n,x)=>n+power(x),0);for(const x of [...A,...B])x.unit.inBattle=true;const coverA=bridgeCover(state,A,totalA,moving),coverB=bridgeCover(state,B,totalB,moving);battle.bridgeA=coverA.bridge?.river||null;battle.bridgeB=coverB.bridge?.river||null;let ca=battle.carryA+attackB*.05*dt*coverA.factor,cb=battle.carryB+attackA*.05*dt*coverB.factor,la=Math.min(totalA,Math.floor(ca)),lb=Math.min(totalB,Math.floor(cb));battle.carryA=ca-la;battle.carryB=cb-lb;battle.lossA+=battleLosses(A,la);battle.lossB+=battleLosses(B,lb);
  recordWarLoss(state,battle.ownerA,battle.ownerB,'soldiersLost',la);
  recordWarLoss(state,battle.ownerB,battle.ownerA,'soldiersLost',lb);
  battle.totalA=totalA-la;battle.totalB=totalB-lb;if(battle.totalA>0&&battle.totalB>0)active.push(battle);else{for(const x of [...A,...B])x.unit.inBattle=false;state.onBattleChanged?.({kind:'end',a:battle.a,b:battle.b,battle,winner:battle.totalA>0?battle.ownerA:battle.totalB>0?battle.ownerB:null})}}

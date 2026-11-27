@@ -38,16 +38,23 @@ async function verifyBorderPaint(page){
 }
 
 async function verifyPoliticalBorders(page){
- const readBorder=()=>page.evaluate(async()=>{
-  await new Promise(requestAnimationFrame);
+ const readBorder=(stage=null)=>page.evaluate(async stage=>{
+  for(let frame=0;frame<120;frame++){
+   await new Promise(requestAnimationFrame);
+   const view=mapView();
+   if(!stage||stage==='tilt'&&view.atlasPitch>.25&&view.opacity===0||stage==='blend'&&view.opacity>.15&&view.opacity<.85)break;
+  }
   const path=document.querySelector('#vassal-border-layer clipPath path');
   const region=state.regions.find(r=>path.parentElement.id.endsWith('-'+r.id));
   const [x,y,z]=groundedBorderRings(region).find(ring=>ring.length>=3)[0];
   const point=path.getPointAtLength(0).matrixTransform(path.getScreenCTM());
-  const expected=project(x,z,y+.7);
+  const view=mapView();
+  // project() fades elevation on labels. The outline keeps the rendered terrain height.
+  const expected=project(x,z,y);
+  expected.y-=y*view.opacity*view.scale*view.height/(2*view.norm);
   return {error:Math.hypot(point.x-expected.x,point.y-expected.y),x:point.x,y:point.y,
-   path:path.getAttribute('d'),scale:cam.scale,yaw:cam.yaw};
- });
+   path:path.getAttribute('d'),scale:cam.scale,yaw:cam.yaw,tilt:cam.tilt,pitch:view.atlasPitch,opacity:view.opacity};
+ },stage);
  const drag=async (button,x,y,dx,dy,check)=>{
   await page.mouse.move(x,y);
   await page.mouse.down({button});
@@ -74,11 +81,34 @@ async function verifyPoliticalBorders(page){
  const zoomed=await readBorder();
  if(zoomed.error>1||zoomed.path!==panned.path)throw Error('Контур державы смещается при зуме');
  await drag('right',x,y,70,25,async()=>{
-  const rotated=await readBorder();
-  if(rotated.error>1||rotated.yaw===zoomed.yaw||rotated.path===zoomed.path){
-   throw Error('Контур державы не следует за поворотом камеры');
+  const unchanged=await readBorder();
+  if(unchanged.yaw!==zoomed.yaw||unchanged.tilt!==zoomed.tilt||unchanged.x!==zoomed.x||unchanged.y!==zoomed.y){
+   throw Error('ПКМ меняет положение камеры');
   }
  });
+ await page.keyboard.down('KeyE');
+ try{
+  await page.waitForFunction(yaw=>cam.yaw!==yaw,zoomed.yaw);
+  const rotated=await readBorder();
+  if(rotated.error>1||rotated.yaw===zoomed.yaw||rotated.path===zoomed.path){
+   throw Error('Контур державы не следует за поворотом камеры с клавиатуры');
+  }
+ }finally{await page.keyboard.up('KeyE')}
+ const scale=await page.evaluate(()=>{
+  const previous=cam.scale;
+  cam.scale=(ATLAS_TILT_START+ATLAS_EXIT_ZOOM)/2;
+  return previous;
+ });
+ try{
+  const tilted=await readBorder('tilt');
+  if(tilted.pitch<=.25||tilted.opacity!==0||tilted.error>1)throw Error('Контуры расходятся при наклоне перед атласом: '+tilted.error+' пикселей');
+  await page.evaluate(()=>{cam.scale=MIN_MAP_ZOOM});
+  const blended=await readBorder('blend');
+  if(blended.opacity<=.15||blended.opacity>=.85||blended.error>1)throw Error('Контуры расходятся при переходе в атлас: '+blended.error+' пикселей');
+ }finally{
+  await page.evaluate(scale=>{cam.scale=scale},scale);
+  await page.waitForFunction(()=>mapView().opacity===0&&mapView().atlasPitch===0);
+ }
 }
 
 async function verifyBuildingMarkers(page){
@@ -394,16 +424,16 @@ async function verifyVictoryRings(page){
     await page.keyboard.press('Home');
     await page.evaluate(()=>{
      const scale=cam.scale;
-     const redraw=scale=>{cam.scale=scale/WORLD_SCALE;renderLabels()};
+     const redraw=offset=>{cam.scale=ATLAS_TILT_START+offset/WORLD_SCALE;renderLabels()};
      try{
-      redraw(.0073);if(labelsJob&&labelStep(Infinity))labelsJob=null;
-      for(const scale of [.00699,.00701,.00699,.00701]){
-       redraw(scale);
+      redraw(.0002);if(labelsJob&&labelStep(Infinity))labelsJob=null;
+      for(const offset of [.00004,.00008,.00004,.00008]){
+       redraw(offset);
        if(labelsJob||labelMeta.overview)throw Error('Label mode flickers inside the zoom threshold band');
       }
-      redraw(.0067);
+      redraw(-.00004);
       if(!labelsJob?.overview)throw Error('Overview label update did not start');
-      redraw(.0073);
+      redraw(.0002);
       if(labelsJob||labelMeta.overview)throw Error('Obsolete overview labels survived a zoom reversal');
      }finally{cam.scale=scale;dirtyLabels=true}
     });
@@ -425,10 +455,27 @@ async function verifyVictoryRings(page){
     const afterZoom=await page.evaluate(()=>[...document.querySelectorAll('#labels .map-label')].filter(el=>el.style.display!=='none').length);
     console.log('После остановки зума видимых меток:',afterZoom);
     // Обзорный зум: строки держав не должны копиться, подпись моря — одна.
-    for(let i=0;i<14;i++){await page.mouse.wheel(0,160);await page.waitForTimeout(60);}
+    const moveToWorld=async()=>{
+     const point=await page.evaluate(()=>{
+      const world=document.getElementById('world');
+      return [[.52,.4],[.65,.65],[.73,.38],[.36,.36]].map(([x,y])=>[Math.round(x*innerWidth),Math.round(y*innerHeight)])
+       .find(([x,y])=>document.elementFromPoint(x,y)===world);
+     });
+     if(!point)throw Error('Нет точки на карте для проверки атласа');
+     await page.mouse.move(...point);
+    };
+    for(let i=0;i<22;i++){
+     if(await page.evaluate(()=>cam.scale<=ATLAS_ENTER_ZOOM))break;
+     await moveToWorld();await page.mouse.wheel(0,300);await page.waitForTimeout(75);
+    }
+    await page.waitForFunction(()=>mapView().cartographic&&atlasProgress===1&&
+     getComputedStyle(document.getElementById('diplomatic-atlas')).opacity==='1',null,{timeout:4000}).catch(async error=>{
+      const view=await page.evaluate(()=>({scale:cam.scale,target:ATLAS_ENTER_ZOOM,progress:atlasProgress,mode,paused:gameShell.paused}));
+      throw Error('Атлас не открылся после отдаления · '+JSON.stringify(view),{cause:error});
+     });
     await page.waitForTimeout(400);
     const ov1=await page.evaluate(()=>({realms:document.querySelectorAll('#labels .label-realms > *').length,sea:document.querySelectorAll('#labels .sea-label').length,scale:document.getElementById('atlas-scale')?.textContent||''}));
-    for(let i=0;i<8;i++){await page.mouse.wheel(0,i%2?-160:160);await page.waitForTimeout(60);}
+    for(let i=0;i<8;i++){await moveToWorld();await page.mouse.wheel(0,i%2?-160:160);await page.waitForTimeout(60);}
     await page.waitForTimeout(400);
     const ov2=await page.evaluate(()=>({realms:document.querySelectorAll('#labels .label-realms > *').length,sea:document.querySelectorAll('#labels .sea-label').length}));
     console.log('Обзорный зум:',ov1.scale,'| строк держав',ov1.realms,'→',ov2.realms,'| море',ov1.sea,'→',ov2.sea);

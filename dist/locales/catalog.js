@@ -1343,8 +1343,8 @@ Shift + своя армия: объединить|Shift + your army: unite|Shift
 Морской узел|Maritime hub|Seehandelsknoten|Carrefour maritime|Núcleo marítimo|Polo marítimo|Węzeł morski|Deniz ticaret merkezi|海上枢纽|海上交易の拠点|해상 교역 거점|Морський вузол
 МОЩЬ|Power.|Leistung.|Puissance.|Poder.|Poder.|Władza.|Güç.|权.|パワー。|힘.|МОЩЬ
 Мощь|Power|Macht|Puissance|Poder|Poder|Potęga|Güç|国力|国力|국력|Міць
-Мстиславль|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislav|姆斯季斯拉夫尔女士|ミシャスラヴル|Mstislavl, 그리스|Мстиславль
-Мстиславское|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislavl|Mstislav|姆斯季斯拉夫尔女士|ミシャスラヴル|Mstislavl, 그리스|Мстиславське
+Могилев|Mogilev|Mahiljou|Moguilev|Moguiliov|Mogilev|Mohylew|Mogilev|莫吉廖夫|モギリョフ|모길료프|Могильов
+Могилевское|Mogilev|Mahiljou|Moguilev|Moguiliov|Mogilev|Mohylew|Mogilev|莫吉廖夫|モギリョフ|모길료프|Могильовське
 Мурсия|Murcia|Murcia|Murcie|Murcia|Murcia|Murcia.|Murcia|穆尔西亚|ムルシア|뚱 베어|Мурсія
 На|Nana|N.A.|Nana|Nana|Nana|Nana|Nana|纳娜|ナナナ|뚱 베어|На
 На {0} дн. при текущем расходе|Nana {0} days at current expense|Nana {0} Tage auf aktuelle Kosten|Nana {0} jours aux frais courants|Nana {0} días a expensas corrientes|Nana {0} dias a expensas correntes|Nana {0} dni na bieżące wydatki|Nana {0} gün mevcut pahasına|Nana {0}日,按当期费用计算|現在の費用のナナ{0}日|Nana {0} 현재 비용에 일|На {0} дн. при цьому витраті

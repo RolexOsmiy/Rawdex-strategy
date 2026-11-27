@@ -1,5 +1,11 @@
 'use strict';
 
+document.addEventListener('contextmenu',event=>event.preventDefault(),{capture:true});
+document.addEventListener('selectstart',event=>{
+ const target=event.target instanceof Element?event.target:event.target.parentElement;
+ if(!target?.isContentEditable&&!target?.closest('input,textarea'))event.preventDefault();
+},{capture:true});
+
 (() => {
  const get=id=>document.getElementById(id);
  const native=globalThis.nativeSettings;

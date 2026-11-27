@@ -5,6 +5,10 @@ const $=id=>document.getElementById(id),canvas=$('world'),gl=globalThis.mapGPU;
 const PARCEL_STYLE_ROWS=GAME_MAP?256:64;
 const WORLD_SCALE=WORLD_WIDTH/1100;
 const MIN_MAP_ZOOM=.0023/WORLD_SCALE,MAX_MAP_ZOOM=.08;
+const ATLAS_TILT_START=.00445/WORLD_SCALE,ATLAS_ENTER_ZOOM=.00335/WORLD_SCALE,ATLAS_EXIT_ZOOM=.00365/WORLD_SCALE;
+const ATLAS_TRANSITION_MS=560;
+const atlasEase=t=>t*t*(3-2*t);
+const riverMap=new RiverMap(CAMPAIGN_RIVERS);
 const WAGON_DETAIL_ZOOM=Math.sqrt(MIN_MAP_ZOOM*MAX_MAP_ZOOM);
 const SHIP_CLEARANCE=3.1;
 const prog=gl.createMapProgram('world');gl.useProgram(prog);
@@ -34,7 +38,7 @@ function queueMapImage(path,upload){
  img.src=path;
 }
 
-function loadMapTexture(path,unit,repeat=true,preserveSize=false){
+function loadMapTexture(path,unit,repeat=true,preserveSize=false,retainImage=false){
  const asset={texture:gl.createTexture(),ready:false};
  gl.activeTexture(gl.TEXTURE0+unit);
  gl.bindTexture(gl.TEXTURE_2D,asset.texture);
@@ -67,11 +71,13 @@ function loadMapTexture(path,unit,repeat=true,preserveSize=false){
      if(anisotropy)gl.texParameterf(gl.TEXTURE_2D,anisotropy.TEXTURE_MAX_ANISOTROPY_EXT,
       Math.min(8,gl.getParameter(anisotropy.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
     }
+    if(retainImage)asset.image=img;
     asset.ready=true;
  });
  return asset;
 }
-const groundAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-meadow.png',0,false),waterAsset=loadMapTexture('terrain-water.png',1),forestAsset=loadMapTexture('maps/mediterranean/woodland.png',2,false),forestSpruceAsset=loadMapTexture('forest-spruce.png',3,false);
+const groundAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-meadow.png',0,false),waterAsset=loadMapTexture('terrain-water.png',1);
+const forestAsset=loadMapTexture('maps/mediterranean/woodland.png',2,false,false,true),forestSpruceAsset=loadMapTexture('forest-spruce.png',3,false,false,true);
 const closeGroundAsset=loadMapTexture('terrain-close.png',2);
 const meadowBrushAsset=loadMapTexture('terrain-painted-meadow.png',16);
 const materialsAsset=loadMapTexture('terrain-materials.png',4);
@@ -106,9 +112,9 @@ function makeRoadTexture(){
 }
 const roadTexture=makeRoadTexture();
 const pilotLand=typeof ANDALUSIA==='undefined'?null:ANDALUSIA;
-const floodplainAsset=loadMapTexture('forest-floodplain.png',2,false);
+const floodplainAsset=loadMapTexture('forest-floodplain.png',2,false,false,true);
 const woodlandAsset=forestAsset;
-const oliveAsset=pilotLand?loadMapTexture('maps/mediterranean/olive-trees.png',2,false):null;
+const oliveAsset=pilotLand?loadMapTexture('maps/mediterranean/olive-trees.png',2,false,false,true):null;
 const andalusiaAsset=pilotLand?loadMapTexture('maps/mediterranean/andalusia-ground.png',3,false):null;
 // Pixel-exact parcel IDs: sampled while rendering the original terrain triangles.
 function createParcelIndex(){
@@ -257,6 +263,9 @@ function useActionTitles(entries){
 }
 
 let state={regions:HISTORICAL_REGIONS.map(initRegion),gold:450,started:false,selected:null,visualJobs:[]},cam=startingCamera(),mode=null,hover=null,hoverRegion=null,drag=null,dirtyLabels=true,ghost=null;globalThis.__gameState=state;
+const diplomaticAtlas=new DiplomaticAtlas($('diplomatic-atlas'),GAME_MAP?.id||'baltic',state.regions);
+const atlasBoundaryCache=new Map();
+diplomaticAtlas.loaded.then(()=>{dirtyLabels=true});
 uploadParcelAnchors();
 function updateBotSetup(){
  const slider=$('bot-count'),max=Math.max(1,state.regions.length-1);
@@ -316,7 +325,13 @@ function landscapeSample(x,z,forest=false){
  return a+(b-a)*tz;
 }
 function landscapeRelief(x,z){
- if(landscapeGrid)return landscapeSample(x,z);
+ if(landscapeGrid){
+  const relief=landscapeSample(x,z);
+  const outside=Math.max(0,-x,-z,x-WORLD_WIDTH,z-WORLD_HEIGHT);
+  if(!outside)return relief;
+  const blend=atlasEase(Math.min(1,outside/(GAME_MAP?125:72)));
+  return relief+(terrainHeight(x,z)-relief)*blend;
+ }
  const height=terrainHeight(x,z);
  if(GAME_MAP)return height;
  const profile=Math.max(0,Math.min(1,(x-555)/274));
@@ -1386,11 +1401,6 @@ function addBuilding(out,b,ghostColor){
    ...(ghostColor||[parts[i+3],parts[i+4],parts[i+5]]));
  }
 }
-function roundedTree(out,x,y,z,r,h,color){
- const trunk=[.30,.27,.19];cube(out,x,y,z,r*.28,h*.52,r*.28,trunk);const rings=[[.32,.55],[.82,.95],[1,1.25],[.8,1.57],[.34,1.86]],sides=6;
- for(let j=0;j<rings.length-1;j++)for(let i=0;i<sides;i++){let a=i*Math.PI*2/sides,b=(i+1)*Math.PI*2/sides,rr=r*rings[j][0],ss=r*rings[j+1][0],y1=y+h*rings[j][1]/2,y2=y+h*rings[j+1][1]/2,col=tint(color,.78+.1*((i+1)%4));quad(out,[x+Math.cos(a)*rr,y1,z+Math.sin(a)*rr],[x+Math.cos(b)*rr,y1,z+Math.sin(b)*rr],[x+Math.cos(b)*ss,y2,z+Math.sin(b)*ss],[x+Math.cos(a)*ss,y2,z+Math.sin(a)*ss],col)}
- const top=y+h;for(let i=0;i<sides;i++){let a=i*Math.PI*2/sides,b=(i+1)*Math.PI*2/sides,rr=r*rings.at(-1)[0];tri(out,[x+Math.cos(a)*rr,y+h*.93,z+Math.sin(a)*rr],[x+Math.cos(b)*rr,y+h*.93,z+Math.sin(b)*rr],[x,top,z],tint(color,1.08))}
-}
 function forestGround(x,z){return coastDistance(x,z)>=1&&!!regionAt(state.regions,x,z)}
 function inCoastalWoods(x,z){
  const p=pilotLand;
@@ -1445,13 +1455,21 @@ function makeCoastalWoods(){
    shadows.push({x:x+.38*w,z:z+.33*w,rx:w*1.65,rz:w*1.10,opacity:.24});
   }
  }
- return {crowns:packForestVertices(crowns),shadows};
+ return {crowns:packForestSprites(crowns),shadows};
 }
 function packForestVertices(data){
  const buffer=gl.createBuffer();
  gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);
  return {buffer,count:data.length/7};
+}
+function packForestSprites(data){
+ const stamps=new Float32Array(data.length/42*8);
+ for(let i=0,j=0;i<data.length;i+=42,j+=8){
+  const u0=data[i+5],u1=data[i+12],v0=data[i+20],v1=data[i+6];
+  stamps.set([data[i],data[i+2],Math.abs(data[i+3]),data[i+18],Math.min(u0,u1),v0,Math.abs(u1-u0),v1-v0],j);
+ }
+ return {...packForestVertices(data),stamps};
 }
 function woodlandRoadIndex(){
  const size=24,cells=new Map();
@@ -1528,7 +1546,7 @@ function forestSprites(){
   if(kind==='scrub'&&size<.68)continue;
   shadow.push({x:x+half*.56,z:z+half*.44,rx:half*1.62,rz:half*1.04,opacity:.28});
  }
- return {...packForestVertices(deciduous),spruce:packForestVertices(pines),scrub:packForestVertices(scrub),floodplain:packForestVertices(floodplain),
+ return {...packForestSprites(deciduous),spruce:packForestSprites(pines),scrub:packForestSprites(scrub),floodplain:packForestSprites(floodplain),
   shadows:shadow,trees:trees.length};
 }
 const coastalWoods=makeCoastalWoods();
@@ -1606,7 +1624,7 @@ function rebuildBuildingShadows(){
  if(buildingShadows)gl.deleteBuffer(buildingShadows.buffer);
  buildingShadows=packForestVertices(data);
 }
-function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgram(treeProgram);gl.uniform1f(treeLoc.orchard,0);gl.uniform2f(treeLoc.center,cam.x,cam.z);gl.uniform2f(treeLoc.viewport,canvas.width,canvas.height);gl.uniform1f(treeLoc.scale,cam.scale);cameraUniforms(treeLoc);gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.uniform1i(treeLoc.mask,5);gl.enableVertexAttribArray(treeLoc.p);gl.enableVertexAttribArray(treeLoc.uv);gl.enableVertexAttribArray(treeLoc.offset);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgram(treeProgram);gl.uniform1f(treeLoc.orchard,0);gl.uniform2f(treeLoc.center,cam.x,cam.z);gl.uniform2f(treeLoc.viewport,canvas.width,canvas.height);gl.uniform1f(treeLoc.scale,mapView().scale);cameraUniforms(treeLoc);gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.uniform1i(treeLoc.mask,5);gl.enableVertexAttribArray(treeLoc.p);gl.enableVertexAttribArray(treeLoc.uv);gl.enableVertexAttribArray(treeLoc.offset);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
  function group(mesh,asset,unit,cool=false){if(!mesh.count)return;gl.uniform1f(treeLoc.tone,cool?1:0);gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,asset.texture);gl.uniform1i(treeLoc.texture,unit);gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);gl.vertexAttribPointer(treeLoc.p,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(treeLoc.offset,2,gl.FLOAT,false,28,12);gl.vertexAttribPointer(treeLoc.uv,2,gl.FLOAT,false,28,20);gl.drawArrays(gl.TRIANGLES,0,mesh.count)}
  if(shadowsOnly){
   if(actorShadowVertices.length){
@@ -1633,13 +1651,26 @@ function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgra
 
 // One compact exclusion texture keeps trees away from placed buildings, including free placements.
 const forestMask=gl.createTexture();
-function updateForestMask(){const n=256,data=new Uint8Array(n*n*4);function clearAt(p,range=5){let cx=Math.round(p.x/WORLD_WIDTH*(n-1)),cz=Math.round(p.z/WORLD_HEIGHT*(n-1));for(let dz=-Math.ceil(range/2.7);dz<=Math.ceil(range/2.7);dz++)for(let dx=-Math.ceil(range/2.7);dx<=Math.ceil(range/2.7);dx++){let x=cx+dx,z=cz+dz;if(x<0||x>=n||z<0||z>=n)continue;let wx=(x/(n-1))*WORLD_WIDTH,wz=(z/(n-1))*WORLD_HEIGHT;if(Math.hypot(wx-p.x,wz-p.z)<=range){let i=(z*n+x)*4;data[i]=255;data[i+3]=255}}}for(const r of state.regions){if(r.owner==='neutral')clearAt(r.slots[0]);else for(const b of r.buildings){let slot=r.slots.find(q=>q.id===b.slotId),cell=slot&&typeof PARCEL_DATA!=='undefined'?PARCEL_DATA[r.id]?.cells?.[slot.id]:null;const localYard=(b.type==='wood'||b.type==='iron'||b.type==='cloth')&&r.id===pilotLand?.region;if(cell&&b.type!=='wood'&&!localYard){for(const index of cell.mask){data[index*4]=255;data[index*4+3]=255}}else clearAt(b,localYard?7.5:5)}if(state.garrisons?.[r.id]?.troops>0)clearAt({x:r.slots[0].x+3,z:r.slots[0].z+3})}for(const army of state.fieldArmies||[])clearAt({x:army.location.point.x+3,z:army.location.point.z+3});gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,n,n,0,gl.RGBA,gl.UNSIGNED_BYTE,data);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE)}
+let riverForestMask=null;
+function updateForestMask(){const n=256,data=riverForestMask?.slice()||new Uint8Array(n*n*4);function clearAt(p,range=5){let cx=Math.round(p.x/WORLD_WIDTH*(n-1)),cz=Math.round(p.z/WORLD_HEIGHT*(n-1));for(let dz=-Math.ceil(range/2.7);dz<=Math.ceil(range/2.7);dz++)for(let dx=-Math.ceil(range/2.7);dx<=Math.ceil(range/2.7);dx++){let x=cx+dx,z=cz+dz;if(x<0||x>=n||z<0||z>=n)continue;let wx=(x/(n-1))*WORLD_WIDTH,wz=(z/(n-1))*WORLD_HEIGHT;if(Math.hypot(wx-p.x,wz-p.z)<=range){let i=(z*n+x)*4;data[i]=255;data[i+3]=255}}}
+ if(!riverForestMask){
+  const resolution=Math.hypot(WORLD_WIDTH,WORLD_HEIGHT)/(n-1)*.51;
+  for(const [,,rank,points] of riverMap.lines){
+   const range=(rank<=2?2.8:rank<=4?2.35:rank===5?1.85:1.24)+resolution;
+   for(let i=1;i<points.length;i++){
+    const [x,z]=points[i-1],dx=points[i][0]-x,dz=points[i][1]-z,steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/2));
+    for(let j=0;j<=steps;j++)clearAt({x:x+dx*j/steps,z:z+dz*j/steps},range);
+   }
+  }
+  riverForestMask=data.slice();
+ }
+ for(const r of state.regions){if(r.owner==='neutral')clearAt(r.slots[0]);else for(const b of r.buildings){let slot=r.slots.find(q=>q.id===b.slotId),cell=slot&&typeof PARCEL_DATA!=='undefined'?PARCEL_DATA[r.id]?.cells?.[slot.id]:null;const localYard=(b.type==='wood'||b.type==='iron'||b.type==='cloth')&&r.id===pilotLand?.region;if(cell&&b.type!=='wood'&&!localYard){for(const index of cell.mask){data[index*4]=255;data[index*4+3]=255}}else clearAt(b,localYard?7.5:5)}if(state.garrisons?.[r.id]?.troops>0)clearAt({x:r.slots[0].x+3,z:r.slots[0].z+3})}for(const army of state.fieldArmies||[])clearAt({x:army.location.point.x+3,z:army.location.point.z+3});gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,n,n,0,gl.RGBA,gl.UNSIGNED_BYTE,data);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE)}
 function addArmyCamp(v,p,troops,owner){let y=roadGround(p.x,p.z)+.5,col=FACTION_COLORS[owner]||FACTION_COLORS.you,tents=Math.min(5,1+Math.floor(troops/200));for(let i=0;i<tents;i++){let x=p.x+2.5+i*1.8,z=p.z+2.5,base=y+.1,a=[x-.65,base,z-.55],b=[x+.65,base,z-.55],c=[x+.65,base,z+.55],d=[x-.65,base,z+.55],top1=[x,base+1.1,z-.55],top2=[x,base+1.1,z+.55];quad(v,a,top1,top2,d,[.64,.58,.43]);quad(v,top1,b,c,top2,[.76,.68,.49]);tri(v,a,b,top1,[.60,.53,.39]);tri(v,d,top2,c,[.60,.53,.39])}let n=Math.min(24,Math.max(6,Math.ceil(troops/15)));for(let i=0;i<n;i++){let x=p.x+2+(i%6)*.42,z=p.z+4+Math.floor(i/6)*.45;cube(v,x,y+.35,z,.18,.65,.18,col);cube(v,x,y+.78,z,.17,.18,.17,[.78,.68,.52])}cube(v,p.x+2,y+1.1,p.z+2,.06,2,.06,[.38,.3,.2]);cube(v,p.x+2,y+1.8,p.z+2.3,.06,.5,.6,col)}
 // Parcel geometry is baked from the historical province mesh, not circles.
 let parcelSignature='',parcelSurfaceSignature='',parcelDecorBuffer=null;const parcelDecorCache=new Map();
 function parcelCell(r,slot){return typeof PARCEL_DATA==='undefined'?null:PARCEL_DATA[r.id]?.cells?.[slot.id]||null}
 // Stable, low-poly auxiliary scenery distributed over each actual parcel.
-function parcelDecorPoints(r,slot,b){let cell=parcelCell(r,slot);if(!cell)return [];let level=Math.max(1,Math.min(3,b.level||1)),pool=[],seen=new Set(),seed=(r.id+1)*37+(slot.id+1)*109,noise=n=>{let v=Math.sin(n*12.9898+seed*78.233)*43758.5453;return v-Math.floor(v)},inside=(x,z)=>slotAt(r,x,z)?.id===slot.id,minBuildingDistance=Math.max(1,Math.min(3.5,Math.sqrt(cell.area)*.25));function candidate(x,z,key){let signature=Math.round(x*5)+':'+Math.round(z*5);if(seen.has(signature)||Math.hypot(x-b.x,z-b.z)<minBuildingDistance||!inside(x,z))return;for(const [dx,dz] of [[.42,0],[-.42,0],[0,.42],[0,-.42]])if(!inside(x+dx,z+dz))return;seen.add(signature);let fullFit=true;for(const [dx,dz] of [[.95,0],[-.95,0],[0,.95],[0,-.95]])if(!inside(x+dx,z+dz)){fullFit=false;break}pool.push({x,z,rank:noise(key+71),fullFit,distance:Math.hypot(x-b.x,z-b.z)})}for(const index of cell.mask){let ix=index%256,iz=Math.floor(index/256),x=ix/255*WORLD_WIDTH+(noise(index+5)-.5)*2.4,z=iz/255*WORLD_HEIGHT+(noise(index+29)-.5)*1.7;candidate(x,z,index)}if(pool.length<16){let step=Math.max(3,Math.ceil(cell.i.length/900)*3);for(let i=0;i+2<cell.i.length;i+=step){let a=cell.i[i]*2,c=cell.i[i+1]*2,d=cell.i[i+2]*2;candidate((cell.v[a]+cell.v[c]+cell.v[d])/3,(cell.v[a+1]+cell.v[c+1]+cell.v[d+1])/3,i+100000)}}pool.sort((a,b)=>a.rank-b.rank);let near=pool.filter(p=>p.fullFit&&p.distance>=2.5).slice().sort((a,b)=>a.distance-b.distance).slice(0,3),ordered=[...near,...pool.filter(p=>!near.includes(p))],baseCount=Math.min(44,Math.max(8,Math.ceil(cell.area/90))),count=Math.min(44,baseCount+4*(level-1)),spacing=Math.max(.8,Math.min(2.6,Math.sqrt(cell.area)/(Math.sqrt(baseCount)*2.5))),points=[];for(const p of ordered){if(points.some(q=>Math.hypot(q.x-p.x,q.z-p.z)<spacing))continue;let i=points.length,kind;if(b.type==='grain')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%8===2&&p.fullFit?'tree':i%5===3&&p.fullFit?'hay':'shrub';else if(b.type==='wood')kind=i<2&&p.fullFit?'woodpile':i%5===2&&p.fullFit?'hut':'shrub';else if(b.type==='iron')kind=i<2&&p.fullFit&&p.distance>=2.5?'minehut':i%4===2&&p.fullFit?'ore':'shrub';else if(b.type==='cloth')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'rack':'shrub';else if(b.type==='port')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'crate':'shrub';else kind=i<4&&p.fullFit&&p.distance>=2.5?'hut':i%7===0&&p.fullFit?'tree':'shrub';points.push({x:p.x,z:p.z,kind});if(points.length>=count)break}return points}
+function parcelDecorPoints(r,slot,b){let cell=parcelCell(r,slot);if(!cell)return [];let level=Math.max(1,Math.min(3,b.level||1)),pool=[],seen=new Set(),seed=(r.id+1)*37+(slot.id+1)*109,noise=n=>{let v=Math.sin(n*12.9898+seed*78.233)*43758.5453;return v-Math.floor(v)},inside=(x,z)=>slotAt(r,x,z)?.id===slot.id,minBuildingDistance=Math.max(1,Math.min(3.5,Math.sqrt(cell.area)*.25));function candidate(x,z,key){let signature=Math.round(x*5)+':'+Math.round(z*5);if(seen.has(signature)||Math.hypot(x-b.x,z-b.z)<minBuildingDistance||!inside(x,z))return;for(const [dx,dz] of [[.42,0],[-.42,0],[0,.42],[0,-.42]])if(!inside(x+dx,z+dz))return;seen.add(signature);let fullFit=true;for(const [dx,dz] of [[.95,0],[-.95,0],[0,.95],[0,-.95]])if(!inside(x+dx,z+dz)){fullFit=false;break}pool.push({x,z,rank:noise(key+71),fullFit,distance:Math.hypot(x-b.x,z-b.z)})}for(const index of cell.mask){let ix=index%256,iz=Math.floor(index/256),x=ix/255*WORLD_WIDTH+(noise(index+5)-.5)*2.4,z=iz/255*WORLD_HEIGHT+(noise(index+29)-.5)*1.7;candidate(x,z,index)}if(pool.length<16){let step=Math.max(3,Math.ceil(cell.i.length/900)*3);for(let i=0;i+2<cell.i.length;i+=step){let a=cell.i[i]*2,c=cell.i[i+1]*2,d=cell.i[i+2]*2;candidate((cell.v[a]+cell.v[c]+cell.v[d])/3,(cell.v[a+1]+cell.v[c+1]+cell.v[d+1])/3,i+100000)}}pool.sort((a,b)=>a.rank-b.rank);let near=pool.filter(p=>p.fullFit&&p.distance>=2.5).slice().sort((a,b)=>a.distance-b.distance).slice(0,3),ordered=[...near,...pool.filter(p=>!near.includes(p))],baseCount=Math.min(44,Math.max(8,Math.ceil(cell.area/90))),count=Math.min(44,baseCount+4*(level-1)),spacing=Math.max(.8,Math.min(2.6,Math.sqrt(cell.area)/(Math.sqrt(baseCount)*2.5))),points=[];for(const p of ordered){if(points.some(q=>Math.hypot(q.x-p.x,q.z-p.z)<spacing))continue;let i=points.length,kind;if(b.type==='grain')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%5===3&&p.fullFit?'hay':null;else if(b.type==='wood')kind=i<2&&p.fullFit?'woodpile':i%5===2&&p.fullFit?'hut':null;else if(b.type==='iron')kind=i<2&&p.fullFit&&p.distance>=2.5?'minehut':i%4===2&&p.fullFit?'ore':null;else if(b.type==='cloth')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'rack':null;else if(b.type==='port')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'crate':null;else kind=i<4&&p.fullFit&&p.distance>=2.5?'hut':null;points.push({x:p.x,z:p.z,kind});if(points.length>=count)break}return points}
 
 function parcelHut(out,x,z,variant){let y=surfaceHeight(x,z)+.22,wall=variant==='minehut'?[.52,.51,.46]:[.68,.61,.48],roofColor=variant==='minehut'?[.32,.30,.27]:[.43,.30,.23],w=1.5,d=1.15,h=.95;cube(out,x,y,z,w,h,d,wall);let a=[x-w*.58,y+h,z-d*.55],b=[x+w*.58,y+h,z-d*.55],c=[x+w*.58,y+h,z+d*.55],e=[x-w*.58,y+h,z+d*.55],top1=[x,y+h+.62,z-d*.55],top2=[x,y+h+.62,z+d*.55];quad(out,a,top1,top2,e,roofColor);quad(out,top1,b,c,top2,tint(roofColor,.78));tri(out,a,b,top1,roofColor);tri(out,e,top2,c,roofColor);cube(out,x,y+.12,z+d*.51,.26,.58,.08,[.28,.24,.20])}
 function parcelTrail(out,r,slot,a,b){let dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<.1)return;let nx=-dz/length*.11,nz=dx/length*.11,steps=Math.max(2,Math.ceil(length/2));for(let i=0;i<steps;i++){let t=i/steps,u=(i+1)/steps,x=a.x+dx*t,z=a.z+dz*t,xx=a.x+dx*u,zz=a.z+dz*u,mid=slotAt(r,(x+xx)/2,(z+zz)/2);if(!mid||mid.id!==slot.id||slotAt(r,x,z)?.id!==slot.id||slotAt(r,xx,zz)?.id!==slot.id)continue;let y=surfaceHeight(x,z)+.3,yy=surfaceHeight(xx,zz)+.3;quad(out,[x+nx,y,z+nz],[xx+nx,yy,zz+nz],[xx-nx,yy,zz-nz],[x-nx,y,z-nz],[.52,.45,.33])}}
@@ -1722,7 +1753,7 @@ function appendParcelDecor(out,r,slot,b){
  }
  let key=r.id+':'+slot.id+':'+b.type+':'+(b.level||1)+':'+cityGrowthStage(b),cached=parcelDecorCache.get(key);if(!cached){cached=[];let houses=b.type==='city'?cityGrowthPoints(r,slot,b):[],points=parcelDecorPoints(r,slot,b);if(b.type==='grain'&&r.id===pilotLand?.region){
  points=points.filter(p=>p.kind==='hay'&&Math.hypot(b.x-p.x,b.z-p.z)<6);
-}for(const p of points){if(b.type==='city'&&(p.kind==='hut'||houses.some(h=>Math.hypot(h.x-p.x,h.z-p.z)<1.5)))continue;let x=p.x,z=p.z,y=surfaceHeight(x,z)+.25;if(p.kind==='hut'||p.kind==='minehut'){parcelHut(cached,x,z,p.kind);parcelTrail(cached,r,slot,{x:b.x,z:b.z},p)}else if(p.kind==='tree'){roundedTree(cached,x,y,z,.58,1.7,[.30,.42,.27])}else if(p.kind==='hay'){cube(cached,x,y,z,.68,.46,.48,[.71,.59,.32]);cube(cached,x+.5,y,z+.18,.56,.38,.43,[.63,.50,.28])}else if(p.kind==='woodpile'){for(let j=0;j<3;j++)cube(cached,x,y+j*.17,z,1.15,.15,.25,[.49+j*.04,.36,.24])}else if(p.kind==='ore'){cone(cached,x,y,z,.65,.65,[.42,.43,.41],5)}else if(p.kind==='rack'){cube(cached,x-.5,y,z,.08,1.15,.08,[.36,.28,.20]);cube(cached,x+.5,y,z,.08,1.15,.08,[.36,.28,.20]);quad(cached,[x-.5,y+1,z],[x+.5,y+1,z],[x+.5,y+.45,z],[x-.5,y+.45,z],[.75,.65,.55])}else if(p.kind==='crate'){cube(cached,x,y,z,.60,.55,.55,[.49,.36,.25])}else{cone(cached,x,y,z,.40,.42,[.35,.45,.29],5)}}if(b.type==='city')appendCityGrowth(cached,r,slot,b,houses);if(b.type==='grain'&&r.id!==pilotLand?.region)fieldMargins(cached,r,slot,b);parcelDecorCache.set(key,cached)}for(const n of cached)out.push(n)}
+}for(const p of points){if(!p.kind)continue;if(b.type==='city'&&(p.kind==='hut'||houses.some(h=>Math.hypot(h.x-p.x,h.z-p.z)<1.5)))continue;let x=p.x,z=p.z,y=surfaceHeight(x,z)+.25;if(p.kind==='hut'||p.kind==='minehut'){parcelHut(cached,x,z,p.kind);parcelTrail(cached,r,slot,{x:b.x,z:b.z},p)}else if(p.kind==='hay'){cube(cached,x,y,z,.68,.46,.48,[.71,.59,.32]);cube(cached,x+.5,y,z+.18,.56,.38,.43,[.63,.50,.28])}else if(p.kind==='woodpile'){for(let j=0;j<3;j++)cube(cached,x,y+j*.17,z,1.15,.15,.25,[.49+j*.04,.36,.24])}else if(p.kind==='ore'){cone(cached,x,y,z,.65,.65,[.42,.43,.41],5)}else if(p.kind==='rack'){cube(cached,x-.5,y,z,.08,1.15,.08,[.36,.28,.20]);cube(cached,x+.5,y,z,.08,1.15,.08,[.36,.28,.20]);quad(cached,[x-.5,y+1,z],[x+.5,y+1,z],[x+.5,y+.45,z],[x-.5,y+.45,z],[.75,.65,.55])}else if(p.kind==='crate'){cube(cached,x,y,z,.60,.55,.55,[.49,.36,.25])}}if(b.type==='city')appendCityGrowth(cached,r,slot,b,houses);if(b.type==='grain'&&r.id!==pilotLand?.region)fieldMargins(cached,r,slot,b);parcelDecorCache.set(key,cached)}for(const n of cached)out.push(n)}
 function updateMeshBatch(previous,groups){
  const chunks=new Map();
  let count=0;
@@ -1780,7 +1811,7 @@ function scenarioBerth(port,exclude){
   for(const side of [-1,1]) for(const offset of [SHIP_CLEARANCE+.5,SHIP_CLEARANCE+2,SHIP_CLEARANCE+4,SHIP_CLEARANCE+8]){
    const point={x:x-dz/length*side*offset,z:z+dx/length*side*offset};
    const d=distance(port,point);
-   if(d>=gap||exclude&&distance(exclude,point)<.25||!navigableWater(point)) continue;
+   if(d>=gap||exclude&&distance(exclude,point)<.25||!openWater(point)) continue;
    best=point;shore={x,z};gap=d;
   }
  }
@@ -1789,13 +1820,36 @@ function scenarioBerth(port,exclude){
  return best;
 }
 
-function portWaterCell(port,exclude=null){if(GAME_MAP)return scenarioBerth(port,exclude);let cache=state._portWaterCache??=new Map(),key=port.x+':'+port.z+(exclude?':'+exclude.x+':'+exclude.z:'');if(cache.has(key))return cache.get(key);let cells=state._seaWaterCells??=new Map(),best=null,d=Infinity;for(let x=0;x<=784;x+=14)for(let z=0;z<=280;z+=14){if(exclude&&x===exclude.x&&z===exclude.z)continue;let dd=(x-port.x)**2+(z-port.z)**2;if(dd>=d)continue;let k=x+','+z;if(!cells.has(k))cells.set(k,navigableWater({x,z}));if(cells.get(k)){best={x,z};d=dd}}cache.set(key,best);return best}
+function seaBerth(port,exclude=null){
+ if(GAME_MAP)return scenarioBerth(port,exclude);
+ const cache=state._portWaterCache??=new Map(),key=port.x+':'+port.z+(exclude?':'+exclude.x+':'+exclude.z:'');
+ if(cache.has(key))return cache.get(key);
+ const cells=state._seaWaterCells??=new Map();
+ let best=null,gap=Infinity;
+ for(let x=0;x<=784;x+=14)for(let z=0;z<=280;z+=14){
+  if(exclude&&x===exclude.x&&z===exclude.z)continue;
+  const d=(x-port.x)**2+(z-port.z)**2;
+  if(d>=gap)continue;
+  const id=x+','+z;
+  if(!cells.has(id))cells.set(id,openWater({x,z}));
+  if(cells.get(id)){best={x,z};gap=d}
+ }
+ cache.set(key,best);return best;
+}
+function portWaterCell(port,exclude=null){
+ const region=regionAt(state.regions,port.x,port.z);
+ const hit=riverMap.channelAt(port,RIVER_PORT_REACH);
+ const sea=region?.coast?seaBerth(port,exclude):null;
+ if(!hit||sea&&distance(port,sea)<=hit.distance+3)return sea;
+ const {a,b,name}=hit.segment,dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
+ if(exclude&&distance(hit,exclude)<.25)return null;
+ return {x:hit.x,z:hit.z,river:name,heading:Math.atan2(dz,dx),bankX:-dz/length,bankZ:dx/length};
+}
 // The berth is reserved for the hull. All loading gear sits on its landward side.
 function berthKey(p){return p.x.toFixed(4)+':'+p.z.toFixed(4)}
 function harborFrame(port){
- if(!GAME_MAP)return null;
  const berth=portWaterCell(port);
- if(!berth)return null;
+ if(!berth||berth.river||!GAME_MAP)return null;
  return state._harborFrames?.get(berthKey(berth))||null;
 }
 function storeHarborFrame(berth,shore){
@@ -1894,7 +1948,7 @@ function drawHarborLanding(out,port,f){
  }
  for(let j=1;j<edges.length;j++)quad(out,edges[j-1][0],edges[j-1][1],edges[j][1],edges[j][0],[.54,.46,.33]);
 }
-function addPortLanding(out,port){const frame=harborFrame(port);if(frame){drawHarborLanding(out,port,frame);return}let p=portWaterCell(port);if(!p)return;let y=-.83,wood=[.44,.32,.21],wall=[.70,.64,.49],roofColor=[.44,.29,.23];cube(out,p.x,y,p.z,3.8,.3,2.6,wood);cube(out,p.x-1,y+.3,p.z,1.3,1.2,1.2,wall);cone(out,p.x-1,y+1.5,p.z,1.0,.7,roofColor,4);cube(out,p.x+1.3,y+.3,p.z+.8,.12,1.9,.12,wood);cube(out,p.x+1.3,y+1.9,p.z+.56,.08,.45,.50,FACTION_COLORS[port.faction]||[.80,.70,.48])}
+function addPortLanding(out,port){const frame=harborFrame(port);if(frame){drawHarborLanding(out,port,frame);return}let p=portWaterCell(port);if(!p)return;if(p.river){addRiverPier(out,port,p);return}let y=-.83,wood=[.44,.32,.21],wall=[.70,.64,.49],roofColor=[.44,.29,.23];cube(out,p.x,y,p.z,3.8,.3,2.6,wood);cube(out,p.x-1,y+.3,p.z,1.3,1.2,1.2,wall);cone(out,p.x-1,y+1.5,p.z,1.0,.7,roofColor,4);cube(out,p.x+1.3,y+.3,p.z+.8,.12,1.9,.12,wood);cube(out,p.x+1.3,y+1.9,p.z+.56,.08,.45,.50,FACTION_COLORS[port.faction]||[.80,.70,.48])}
 function addArmoryAnnex(out,region){
  const seat=duchySeat(region);
  if(!seat)return;
@@ -1913,6 +1967,14 @@ function addArmoryAnnex(out,region){
  for(const dx of [-1.9,1.2])cube(out,x+dx*s,y+1.37*s,z+1.83*s,.52*s,.55*s,.12*s,[.24,.18,.12]);
  cube(out,x+2.2*s,y+.27*s,z+2.6*s,1.25*s,.49*s,.70*s,oak);
  cube(out,x+2.2*s,y+.75*s,z+2.6*s,.92*s,.22*s,.47*s,[.39,.41,.40]);
+}
+function addRiverPier(out,port,berth){
+ const side=(port.x-berth.x)*berth.bankX+(port.z-berth.z)*berth.bankZ>=0?1:-1;
+ const nx=berth.bankX*side,nz=berth.bankZ*side;
+ const x=berth.x+nx*2.4,z=berth.z+nz*2.4,y=surfaceHeight(x,z)+.38;
+ timberBeam(out,[berth.x+nx*.45,y,berth.z+nz*.45],[x+nx*2.3,y,z+nz*2.3],.63,[.47,.33,.21]);
+ cube(out,x,y,z,2.1,.30,1.82,[.52,.38,.24]);
+ for(const along of [-1,1])cube(out,x-nz*along*.9,y-.57,z+nx*along*.9,.23,.77,.23,[.36,.27,.18]);
 }
 function geometryForBuildings(){
  rebuildOlives();updateForestMask();rebuildBuildingShadows();
@@ -1948,61 +2010,50 @@ function geometryForBuildings(){
 }
 // Extend the same relief outside playable borders instead of a flat floor.
 // The sea remains below water level, so the water surface covers the seabed.
-const BOARD_SEA=[[-112,-176],[860,-176],[840,-140],[815,-110],[800,-65],[800,0],...BALTIC.slice(2),[-112,265]];
-function backgroundHeight(x,z){return inRing(x,z,BOARD_SEA)?-2:surfaceHeight(x,z)}
+const backdrop=CAMPAIGN_RIVERS.backdrop;
+const backdropCoast=atob(backdrop.coast);
+function coastRelief(x,z){
+ const {extent:[x0,z0,x1,z1],cols,rows}=backdrop;
+ const u=Math.max(0,Math.min(cols-1,(x-x0)/(x1-x0)*(cols-1)));
+ const v=Math.max(0,Math.min(rows-1,(z-z0)/(z1-z0)*(rows-1)));
+ const col=Math.min(cols-2,Math.floor(u)),row=Math.min(rows-2,Math.floor(v));
+ const tx=u-col,tz=v-row,i=row*cols+col;
+ const a=backdropCoast.charCodeAt(i)*(1-tx)+backdropCoast.charCodeAt(i+1)*tx;
+ const b=backdropCoast.charCodeAt(i+cols)*(1-tx)+backdropCoast.charCodeAt(i+cols+1)*tx;
+ return a*(1-tz)+b*tz-128;
+}
+function backgroundHeight(x,z){
+ const [x0,z0,x1,z1]=GAME_MAP?.bounds||[0,0,WORLD_WIDTH,WORLD_HEIGHT];
+ const inside=Math.min(x-x0,x1-x,z-z0,z1-z);
+ const original=inside>=0?isSeaBackground(x,z):false;
+ if((original&&inside>=28)||(!GAME_MAP&&riverMap.offshoreAt({x,z})))return -2.3;
+ let distance=coastRelief(x,z);
+ if(inside>0){
+  const blend=Math.min(1,inside/28);
+  const legacy=(original?-1:1)*Math.max(3,Math.min(18,Math.abs(distance)));
+  distance+=(legacy-distance)*blend;
+ }
+ if(distance<=0)return -2.3;
+ return -2.3+(surfaceHeight(x,z)+2.3)*atlasEase(Math.min(1,distance/11));
+}
 function createBasemap(){
- const land=[],sea=[],table=[],step=16,x0=-112,x1=1200,z0=-176,z1=816,cache=new Map();
- const tableX=WORLD_WIDTH+900,tableZ=WORLD_HEIGHT+1098;
- quad(table,[-1200,-5,-1200],[tableX,-5,-1200],[tableX,-5,tableZ],[-1200,-5,tableZ],[.07,.09,.10]);
- function ground(x,z){let key=x+','+z,p=cache.get(key);if(!p){p={x,z,y:backgroundHeight(x,z),color:landscapeColor(x,z)};cache.set(key,p)}return p}
- function push(p){vertex(land,p.x,p.y,p.z,p.color)}
- if(!GAME_MAP){
-  // The land backdrop is clipped to the world bounds: nothing pokes past the
-  // map edge, so the painted geography can never smear outside the world.
-  const gx0=Math.max(0,x0),gx1=Math.min(WORLD_WIDTH,x1),gz0=Math.max(0,z0),gz1=Math.min(WORLD_HEIGHT,z1);
-  for(let z=gz0;z<gz1;z+=step)for(let x=gx0;x<gx1;x+=step){let a=ground(x,z),b=ground(x+step,z),c=ground(x+step,z+step),d=ground(x,z+step);push(a);push(b);push(c);push(a);push(c);push(d)}
+ const land=[],sea=[],table=[],[x0,z0,x1,z1]=backdrop.extent,step=GAME_MAP?18:12;
+ quad(table,[x0-900,-5,z0-900],[x1+900,-5,z0-900],[x1+900,-5,z1+900],[x0-900,-5,z1+900],[.07,.09,.10]);
+ quad(sea,[x0,-1,z0],[x1,-1,z0],[x1,-1,z1],[x0,-1,z1],[.12,.23,.27]);
+ const columns=Math.ceil((x1-x0)/step),rows=Math.ceil((z1-z0)/step);
+ let previous=null;
+ for(let row=0;row<=rows;row++){
+  const z=z0+(z1-z0)*row/rows,current=[];
+  for(let col=0;col<=columns;col++){
+   const x=x0+(x1-x0)*col/columns,y=backgroundHeight(x,z);
+   current.push({point:[x,y,z],color:y<=-2.3?[.12,.23,.27]:landscapeColor(x,z)});
+   if(!previous||!col)continue;
+   const a=previous[col-1],b=previous[col],c=current[col],d=current[col-1];
+   if([a,b,c,d].every(p=>p.point[1]<=-2.3))continue;
+   for(const {point,color} of [a,b,c,a,c,d])vertex(land,...point,color);
+  }
+  previous=current;
  }
- const [xMin,zMin,xMax,zMax]=GAME_MAP?.bounds||[0,0,0,0],outer=GAME_MAP?[[xMin,zMin],[xMax,zMin],[xMax,zMax],[xMin,zMax]]:BOARD_SEA;
- if(GAME_MAP){
-  // The study area ends across a continent. Keep the dry backdrop behind settlements near its edge.
-  const spacing=2;
-  const coast=[];
-  for(let x=xMin;x<xMax+spacing;x+=spacing){
-   const px=Math.min(x,xMax);
-   coast.push({x:px,water:isSeaBackground(px,zMax-.15),reach:0});
-  }
-  // Round off each inlet across the campaign cut using its own mouth width.
-  // The curved shoreline is a mesh row, so no fixed-width columns show through.
-  for(let i=0;i<coast.length;){
-   if(!coast[i].water){i++;continue}
-   const start=i;
-   while(i<coast.length&&coast[i].water)i++;
-   const west=coast[start].x-spacing*.5,east=coast[i-1].x+spacing*.5;
-   const radius=(east-west)*.5;
-   for(let j=start;j<i;j++){
-    const u=(coast[j].x-west)/radius-1;
-    coast[j].reach=Math.min(39,radius*.81)*Math.sqrt(Math.max(0,1-u*u));
-   }
-  }
-  let rim=null;
-  for(const {x,water,reach} of coast){
-   const bands=[0,Math.max(.08,reach*.51),Math.max(.16,reach),reach+2.1,reach+8,64,104];
-   const column=bands.map((offset,row)=>{
-    const p=ground(x,zMax+offset);
-    if(!water||row>3)return p;
-    return {...p,y:[-1.45,-1.38,-1.05,Math.max(-.4,p.y)][row]};
-   });
-   if(rim)for(let i=1;i<bands.length;i++){
-    push(rim[i-1]);push(column[i-1]);push(column[i]);
-    push(rim[i-1]);push(column[i]);push(rim[i]);
-   }
-   rim=column;
-  }
- }
- // Continue the water underneath the coastal backdrop. Open estuaries at the
- // campaign edge should expose water between the banks, not the tabletop.
- if(GAME_MAP)quad(sea,[xMin,-1.05,zMax],[xMax,-1.05,zMax],[xMax,-1.05,zMax+104],[xMin,-1.05,zMax+104],[.12,.23,.27]);
- for(const triangle of triangulatePolygon(outer))tri(sea,[triangle[0][0],-1,triangle[0][1]],[triangle[1][0],-1,triangle[1][1]],[triangle[2][0],-1,triangle[2][1]],[.12,.23,.27]);
  return {land:makeBuffer(land),sea:makeBuffer(sea),table:makeBuffer(table)};
 }
 
@@ -2189,23 +2240,21 @@ function buildBorderOverlay(signature){
  for(const path of paths)path.element=borderOverlayLayer.querySelector('#'+path.id);
  return {signature,paths,group:borderOverlayLayer.firstElementChild};
 }
-function renderVassalBorders(){
+function renderVassalBorders(view){
  const signature=state.regions.map(r=>[
   r.id,r.owner,r.vassalId,FACTION_COLORS[r.owner],vassalFor(state,r)?.color
  ].join(':')).join('|');
  if(borderOverlay?.signature!==signature)borderOverlay=buildBorderOverlay(signature);
- const width=canvas.clientWidth,height=canvas.clientHeight;
+ const {width,height,yaw,tilt,c,s,norm}=view;
  if(!width||!height)return;
- const yaw=cam.yaw||0,tilt=cam.tilt??DEFAULT_CAMERA_TILT;
- const c=Math.cos(yaw),s=Math.sin(yaw),norm=1/Math.hypot(1,tilt);
  if(borderOverlay.yaw!==yaw||borderOverlay.tilt!==tilt){
-  // Проекция без смещения и масштаба камеры, с учётом высоты рельефа.
+  // Use the same terrain projection as the WebGPU border strokes.
   for(const {element,chains,closed} of borderOverlay.paths){
    let d='';
    for(const chain of chains){
     for(let i=0;i<chain.length;i++){
      const [x,y,z]=chain[i];
-     const px=c*x-s*z,py=((s*x+c*z)*tilt-y-.7)*norm;
+     const px=c*x-s*z,py=((s*x+c*z)*tilt-y)/norm;
      d+=(i?'L':'M')+px.toFixed(3)+' '+py.toFixed(3);
     }
     if(closed)d+='Z';
@@ -2218,9 +2267,9 @@ function renderVassalBorders(){
   borderOverlayLayer.setAttribute('viewBox','0 0 '+width+' '+height);
   borderOverlay.width=width;borderOverlay.height=height;
  }
- const scale=height*cam.scale/2;
- const x=width/2-(c*cam.x-s*cam.z)*scale;
- const y=height/2-(s*cam.x+c*cam.z)*tilt*norm*scale;
+ const scale=height*view.scale/2;
+ const x=width/2-(c*view.x-s*view.z)*scale;
+ const y=height/2-(s*view.x+c*view.z)*tilt/norm*scale;
  const transform=`translate(${x} ${y}) scale(${scale})`;
  if(borderOverlay.transform!==transform){
   borderOverlay.group.setAttribute('transform',transform);
@@ -2306,7 +2355,7 @@ function rebuildCountryTint(owner,changed=null){
 function drawBorderBuffer(buffer,width,color){if(!buffer?.count)return;gl.bindBuffer(gl.ARRAY_BUFFER,buffer.buffer);gl.vertexAttribPointer(borderLoc.position,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(borderLoc.direction,3,gl.FLOAT,false,28,12);gl.vertexAttribPointer(borderLoc.side,1,gl.FLOAT,false,28,24);gl.uniform1f(borderLoc.width,width*canvas.width/canvas.clientWidth);gl.uniform3f(borderLoc.color,...color);gl.drawArrays(gl.TRIANGLES,0,buffer.count)}
 let musterHoverId=null,musterFocusId=null,musterOutline=null,selectedOutline=null;
 const steadyWarOutline=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribArray(borderLoc.position);gl.enableVertexAttribArray(borderLoc.direction);gl.enableVertexAttribArray(borderLoc.side);gl.uniform2f(borderLoc.center,cam.x,cam.z);gl.uniform2f(borderLoc.viewport,canvas.width,canvas.height);gl.uniform1f(borderLoc.scale,cam.scale);cameraUniforms(borderLoc);
+function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribArray(borderLoc.position);gl.enableVertexAttribArray(borderLoc.direction);gl.enableVertexAttribArray(borderLoc.side);gl.uniform2f(borderLoc.center,cam.x,cam.z);gl.uniform2f(borderLoc.viewport,canvas.width,canvas.height);gl.uniform1f(borderLoc.scale,mapView().scale);cameraUniforms(borderLoc);
  // Terrain and roads have already rendered. Keep the surface geometry, but
  // draw these strokes in screen space without testing the terrain depth.
  gl.disable(gl.DEPTH_TEST);
@@ -2344,15 +2393,96 @@ function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribAr
  }
  drawSelectedArmyRoutes();
  gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.useProgram(prog);for(const i of [borderLoc.position,borderLoc.direction,borderLoc.side])if(i!==loc.p&&i!==loc.c)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(loc.p);gl.enableVertexAttribArray(loc.c);
- renderVassalBorders();
+ renderVassalBorders(mapView());
 }
 function resize(){let d=Math.min(2,devicePixelRatio||1),s=cachedScale;if(!(s>0.05&&s<=2))s=1;let w=Math.max(1,Math.floor(canvas.clientWidth*d*s)),h=Math.max(1,Math.floor(canvas.clientHeight*d*s));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);dirtyLabels=true}}
-function cameraUniforms(u){const yaw=cam.yaw||0;gl.uniform2f(u.orientation,Math.cos(yaw),Math.sin(yaw));gl.uniform1f(u.tilt,cam.tilt??DEFAULT_CAMERA_TILT)}
-function project(x,z,y=0){let a=canvas.clientWidth/canvas.clientHeight,yaw=cam.yaw||0,c=Math.cos(yaw),s=Math.sin(yaw),dx=x-cam.x,dz=z-cam.z,rx=c*dx-s*dz,rz=s*dx+c*dz,tilt=cam.tilt??DEFAULT_CAMERA_TILT,norm=Math.hypot(1,tilt);return {x:canvas.clientWidth/2+rx*cam.scale/a*canvas.clientWidth/2,y:canvas.clientHeight/2-(-rz*tilt+y)/norm*cam.scale*canvas.clientHeight/2}}
-function unproject(px,py){let yaw=cam.yaw||0,c=Math.cos(yaw),s=Math.sin(yaw),tilt=cam.tilt??DEFAULT_CAMERA_TILT,rx=(px-canvas.clientWidth/2)*2/(canvas.clientHeight*cam.scale),screenY=(canvas.clientHeight/2-py)*2/(canvas.clientHeight*cam.scale),base=-screenY*Math.hypot(1,tilt)/tilt;const point=rz=>({x:cam.x+c*rx+s*rz,z:cam.z-s*rx+c*rz});const f=rz=>{let p=point(rz);return rz-base-surfaceHeight(p.x,p.z)/tilt};let previous=base+170/tilt,prevF=f(previous);for(let rz=previous-2;rz>=base-3/tilt;rz-=2){let value=f(rz);if(value<=0&&prevF>=0){let low=rz,high=previous;for(let i=0;i<10;i++){let mid=(low+high)/2;if(f(mid)>0)high=mid;else low=mid}let hit=point((low+high)/2);if(regionAt(state.regions,hit.x,hit.z)||!isSeaBackground(hit.x,hit.z))return hit}previous=rz;prevF=value}return point(base)}
+let cachedMapView=null,atlasTarget=false,atlasProgress=0,atlasPitch=0,atlasClock=null,atlasCenterAtMinimum=null;
+const atlasMotionPreference=window.matchMedia('(prefers-reduced-motion: reduce)');
+function atlasAvailable(){return state.started&&diplomaticAtlas.ready&&!mode&&!councilMapOrder}
+function updateAtlasPresentation(now){
+ const time=atlasClock==null?0:Math.min(45,Math.max(0,now-atlasClock));
+ atlasClock=now;
+ if(!atlasAvailable())atlasTarget=false;
+ else if(cam.scale<=ATLAS_ENTER_ZOOM)atlasTarget=true;
+ else if(cam.scale>=ATLAS_EXIT_ZOOM)atlasTarget=false;
+ if(!state.started||atlasMotionPreference.matches)atlasProgress=Number(atlasTarget);
+ else atlasProgress=Math.max(0,Math.min(1,atlasProgress+(atlasTarget?time:-time)/ATLAS_TRANSITION_MS));
+ const approach=atlasAvailable()?Math.max(0,Math.min(1,(ATLAS_TILT_START-cam.scale)/(ATLAS_TILT_START-ATLAS_ENTER_ZOOM))):0;
+ const targetPitch=Math.max(approach,atlasProgress);
+ if(atlasMotionPreference.matches||Math.abs(targetPitch-atlasPitch)<.002)atlasPitch=targetPitch;
+ else atlasPitch+=(targetPitch-atlasPitch)*(1-Math.exp(-time/64));
+ if(cam.scale!==MIN_MAP_ZOOM||!atlasTarget)atlasCenterAtMinimum=null;
+ if(atlasCenterAtMinimum){
+  const focus=atlasCenterAtMinimum;
+  focus.elapsed+=time;
+  const fraction=atlasMotionPreference.matches?1:Math.min(1,focus.elapsed/ATLAS_TRANSITION_MS);
+  const ease=atlasEase(fraction);
+  cam.x=focus.x+(diplomaticAtlas.center.x-focus.x)*ease;
+  cam.z=focus.z+(diplomaticAtlas.center.z-focus.z)*ease;
+  if(fraction===1)atlasCenterAtMinimum=null;
+  dirtyLabels=true;
+ }
+}
+function mapView(){
+ const width=canvas.clientWidth,height=canvas.clientHeight,baseTilt=cam.tilt??DEFAULT_CAMERA_TILT;
+ const {scale:baseScale,yaw=0}=cam;
+ const atlas=atlasAvailable(),progress=atlasProgress;
+ const opacity=atlasEase(Math.min(1,progress/.68));
+ const paper=atlasEase(Math.max(0,(progress-.68)/.32));
+ const cartographic=progress>=.44;
+ const old=cachedMapView;
+ if(old&&old.x===cam.x&&old.z===cam.z&&old.baseScale===baseScale&&old.baseTilt===baseTilt&&old.yaw===yaw&&old.width===width&&old.height===height&&old.atlas===atlas&&old.progress===progress&&old.atlasPitch===atlasPitch)return old;
+ const pitch=Math.atan(baseTilt),eased=atlasEase(atlasPitch);
+ const tilt=Math.tan(pitch+(Math.atan(36)-pitch)*eased);
+ const fit=(atlas||progress)&&height?Math.max(.0001,diplomaticAtlas.fit(width,height,yaw)):MIN_MAP_ZOOM;
+ const fitBlend=Math.max(0,Math.min(1,(ATLAS_ENTER_ZOOM-baseScale)/(ATLAS_ENTER_ZOOM-MIN_MAP_ZOOM)));
+ const scale=baseScale*(1-(1-Math.min(1,fit/MIN_MAP_ZOOM))*fitBlend);
+ const c=Math.cos(yaw),s=Math.sin(yaw),norm=Math.hypot(1,tilt);
+ if(width&&height){
+  const [left,top,right,bottom]=backdrop.extent;
+  const halfAcross=width/(height*scale),halfDown=norm/(scale*tilt);
+  const limit=(position,low,high,half)=>{
+   const inset=Math.min((high-low)/2,half);
+   return Math.max(low+inset,Math.min(high-inset,position));
+  };
+  cam.x=limit(cam.x,left,right,Math.abs(c)*halfAcross+Math.abs(s)*halfDown);
+  cam.z=limit(cam.z,top,bottom,Math.abs(s)*halfAcross+Math.abs(c)*halfDown);
+ }
+ return cachedMapView={x:cam.x,z:cam.z,baseScale,baseTilt,yaw,width,height,atlas,progress,atlasPitch,opacity,paper,cartographic,scale,tilt,c,s,norm};
+}
+function cameraUniforms(u){const view=mapView();gl.uniform2f(u.orientation,view.c,view.s);gl.uniform1f(u.tilt,view.tilt)}
+function project(x,z,y=0){
+ const v=mapView(),dx=x-v.x,dz=z-v.z,zoom=v.scale*v.height/2;
+ const rx=v.c*dx-v.s*dz,rz=v.s*dx+v.c*dz;
+ return {x:v.width/2+rx*zoom,y:v.height/2+(rz*v.tilt-y*(1-v.opacity))/v.norm*zoom};
+}
+function unproject(px,py){
+ const v=mapView(),units=2/(v.height*v.scale),rx=(px-v.width/2)*units,screenZ=(py-v.height/2)*units;
+ const base=screenZ*v.norm/v.tilt;
+ const point=rz=>({x:v.x+v.c*rx+v.s*rz,z:v.z-v.s*rx+v.c*rz});
+ if(v.opacity===1)return point(base);
+ const f=rz=>{const p=point(rz);return rz-base-surfaceHeight(p.x,p.z)*(1-v.opacity)/v.tilt};
+ let previous=base+170/v.tilt,prevF=f(previous);
+ for(let rz=previous-2;rz>=base-3/v.tilt;rz-=2){
+  const value=f(rz);
+  if(value<=0&&prevF>=0){
+   let low=rz,high=previous;
+   for(let i=0;i<10;i++){const mid=(low+high)/2;if(f(mid)>0)high=mid;else low=mid}
+   const hit=point((low+high)/2);
+   if(regionAt(state.regions,hit.x,hit.z)||!isSeaBackground(hit.x,hit.z))return hit;
+  }
+  previous=rz;prevF=value;
+ }
+ return point(base);
+}
 function placementGroundAtScreen(px,py){
- const yaw=cam.yaw||0,c=Math.cos(yaw),s=Math.sin(yaw),tilt=cam.tilt??DEFAULT_CAMERA_TILT;
- const unitsPerPixel=2/(canvas.clientHeight*cam.scale);
+ const {c,s,tilt,scale,cartographic}=mapView();
+ if(cartographic){
+  if(!diplomaticAtlas.contains(px,py))return null;
+  const point=unproject(px,py),region=regionAt(state.regions,point.x,point.z);
+  return region?{...point,region}:null;
+ }
+ const unitsPerPixel=2/(canvas.clientHeight*scale);
  const rayX=(px-canvas.clientWidth/2)*unitsPerPixel;
  const rayY=(canvas.clientHeight/2-py)*unitsPerPixel*Math.hypot(1,tilt);
  const point=depth=>({x:cam.x+c*rayX+s*depth,z:cam.z-s*rayX+c*depth});
@@ -2384,7 +2514,14 @@ function placementGroundAtScreen(px,py){
  }
  return hit;
 }
-function moveCameraScreen(dx,dy){let yaw=cam.yaw||0,c=Math.cos(yaw),s=Math.sin(yaw),sx=dx*2/(canvas.clientHeight*cam.scale),sz=dy*2*Math.hypot(1,cam.tilt??DEFAULT_CAMERA_TILT)/(canvas.clientHeight*cam.scale*(cam.tilt??DEFAULT_CAMERA_TILT));cam.x=Math.max(-300,Math.min(WORLD_WIDTH+300,cam.x-c*sx-s*sz));cam.z=Math.max(-200,Math.min(WORLD_HEIGHT+290,cam.z+s*sx-c*sz));dirtyLabels=true}
+function moveCameraScreen(dx,dy){
+ atlasCenterAtMinimum=null;
+ const {c,s,tilt,scale,norm,height}=mapView();
+ const sx=dx*2/(height*scale),sz=dy*2*norm/(height*scale*tilt);
+ cam.x-=c*sx+s*sz;
+ cam.z+=s*sx-c*sz;
+ mapView();dirtyLabels=true;
+}
 const cameraKeys=new Map();
 function updateCamera(dt){
  if(!dt||!cameraKeys.size)return;
@@ -2545,6 +2682,7 @@ function cityAlertRow(region){
  return row;
 }
 const majorSettlements=new Set(GAME_MAP?['lisbon','seville','malaga','barcelona','genoa','venice','palermo','tunis','algiers','athens','istanbul','alexandria','beirut']:['pomorskie','mazowieckie','poznańskie','wileńskie','Prusy Książęce','Księstwo Kurlandii i Semigalii','kijowskie','pinsk','zytomierz','cherkasy','pereiaslav','mozyrz']);
+const balticAtlasCities=new Set(['Гданьск','Кёнигсберг','Митава','Варшава','Троки','Вильно','Минск','Смоленск','Львов','Киев','Познань']);
 function recruitMapBadge(region){
  const count=(state.recruitments||[]).reduce((sum,order)=>sum+(order.regionId===region.id&&order.owner===region.owner?order.troops:0),0);
  return count?'<span class="garrison-badge">⌛ СБОР '+count+'</span>':'';
@@ -2573,6 +2711,12 @@ function makeSettlementLabel(c,job){
  const {r,pos,frontier,available,advisors,capital,originalOwner}=c;
  const stars=capitalStars(r);
  const el=document.createElement('div'),fortified=state.fortifications?.get(r.id)?.gates.size>0;
+ if(job.diplomatic){
+  el.className='map-label diplomatic-city'+(c.current?' diplomatic-capital':'')+(r===state.selected?' diplomatic-selected':'');
+  el.textContent=r.city;
+  el.style.left=pos.x+'px';el.style.top=pos.y+'px';
+  return el;
+ }
  el.className='map-label settlement-label'+(frontier?' frontier':'')+(job.overview?' chart-settlement':'')+(capital?' capital-settlement':'')+(r===state.selected?' focused-settlement':'')+(!state.started&&r.id===campaignStartChoice?.id?' start-settlement':'')+(available?' council-target-available':'');
  if(frontier)el.title='Соседнее нейтральное герцогство · доступна просьба';
  else if(fortified)el.title='Пограничная крепость';
@@ -2599,7 +2743,39 @@ function makeSettlementLabel(c,job){
  }
  return el;
 }
-function renderRealmLabels(layer,realms,markedCapitals,occupied){
+function renderDiplomaticRealmLabels(layer,realms,occupied){
+ const previous=new Map([...layer.children].map(el=>[el.dataset.owner,el]));
+ const placed=new Set();
+ for(const {owner,holdings} of realms.slice().sort((a,b)=>b.holdings.length-a.holdings.length)){
+  const name=countryName(owner).toLocaleUpperCase(interfaceLocale);
+  const anchors=holdings.map(r=>r.slots[0]);
+  const center=anchors.reduce((p,q)=>({x:p.x+q.x/anchors.length,z:p.z+q.z/anchors.length}),{x:0,z:0});
+  const ordered=anchors.slice().sort((a,b)=>distance(a,center)-distance(b,center));
+  const size=Math.min(32,Math.max(13,11+Math.sqrt(holdings.length)*3.8),canvas.clientWidth/(Math.max(name.length,12)*1.6));
+  const width=name.length*size*.73;
+  let position=null;
+  for(const anchor of ordered){
+   const point=project(anchor.x,anchor.z);
+   for(const dy of [24,-27,43,-46,0]){
+    const x=point.x-width*.08,y=point.y+dy;
+    if(!diplomaticAtlas.contains(x-width*.5,y,10)||!diplomaticAtlas.contains(x+width*.5,y,10))continue;
+    if(occupied.some(b=>Math.abs(b.x-x)<(b.width+width)*.5+10&&Math.abs(b.y-y)<(size+(b.height||13))*.5+7))continue;
+    position={x,y,width,height:size};break;
+   }
+   if(position)break;
+  }
+  if(!position)continue;
+  const el=previous.get(owner)||document.createElement('div');
+  el.className='map-label chart-realm diplomatic-realm';
+  el.dataset.owner=owner;el.textContent=name;el.style.fontSize=size+'px';
+  el.style.left=position.x+'px';el.style.top=position.y+'px';
+  if(!el.parentElement)layer.appendChild(el);
+  placed.add(owner);occupied.push(position);
+ }
+ for(const [owner,el] of previous)if(!placed.has(owner))el.remove();
+}
+function renderRealmLabels(layer,realms,markedCapitals,occupied,diplomatic=false){
+ if(diplomatic){renderDiplomaticRealmLabels(layer,realms,occupied);return}
  for(const {owner,holdings} of realms){
   const name=countryName(owner);
   const existing=[...layer.children].find(el=>el.dataset.owner===owner);
@@ -2615,7 +2791,7 @@ function renderRealmLabels(layer,realms,markedCapitals,occupied){
    if(occupied.some(b=>Math.abs(pos.x-b.x)<(width+b.width)*.5+(retained?5:12)&&Math.abs(pos.y-b.y)<(retained?27:33)))continue;
    const label=existing||document.createElement('div');
    label.className='map-label chart-realm';
-   label.textContent=name;label.style.left=pos.x+'px';label.style.top=pos.y+'px';
+   label.textContent=name;label.style.fontSize='';label.style.left=pos.x+'px';label.style.top=pos.y+'px';
    label.dataset.owner=owner;label.dataset.region=r.id;
    if(!existing)layer.appendChild(label);
    occupied.push({...pos,width});placed=true;break;
@@ -2627,8 +2803,9 @@ function renderRealmLabels(layer,realms,markedCapitals,occupied){
 }
 function renderLabels(){
  const layer=$('labels'),scale=cam.scale*WORLD_SCALE,picking=!!councilMapOrder;
- const overview=labelOverview=scale<(labelOverview===null ? .007 : labelOverview ? .0072 : .0068);
- const signature=labelsSignature();
+ const diplomatic=mapView().cartographic;
+ const overview=labelOverview=diplomatic||scale<(ATLAS_TILT_START*WORLD_SCALE+(labelOverview ? .00012 : 0));
+ const signature=labelsSignature()+'|'+diplomatic;
  const markedCapitals=new Set(state.campaign?.startingCapitals?.keys());
  const candidates=[];
  for(const r of state.regions){
@@ -2639,9 +2816,12 @@ function renderLabels(){
   const frontier=state.started&&r.owner==='neutral'&&adjacentToFaction(state,r,'you');
   const available=picking&&councilMapOrder.targets.has(r.id),advisors=cityAdvisors.get(r.id);
   const priority=r===state.selected||r.id===campaignStartChoice?.id?7:r.id===state.capitalId||originalOwner==='you'||!picking&&advisors?.length?6:available||capital?5:majorSettlements.has(r.key)?4:r.owner!=='neutral'?3:frontier?2:1;
-  if(overview&&priority===1)continue;
+  if(diplomatic){
+   if(priority<5&&!(GAME_MAP?majorSettlements.has(r.key):balticAtlasCities.has(r.city)))continue;
+  }else if(overview&&priority===1)continue;
   const point=r.slots[0]||{x:r.x,z:r.y};
   const pos=project(point.x,point.z,surfaceHeight(point.x,point.z)+(overview?5:6.5));
+  if(diplomatic&&!diplomaticAtlas.contains(pos.x,pos.y,15))continue;
   if(pos.x<-40||pos.y<-35||pos.x>canvas.clientWidth+40||pos.y>canvas.clientHeight+35)continue;
   candidates.push({r,pos,frontier,priority,available,advisors,capital,current,originalOwner});
  }
@@ -2650,10 +2830,12 @@ function renderLabels(){
  const visible=new Map(),occupied=[];
  for(const c of candidates){
   const {r,pos,priority}=c;
-  const width=Math.max(54,Math.min(191,r.city.length*8.4+22+(Number(c.originalOwner!==undefined)+Number(relocatedCapital(r)))*20));
+  const width=diplomatic?Math.max(35,r.city.length*8+11):Math.max(54,Math.min(191,r.city.length*8.4+22+(Number(c.originalOwner!==undefined)+Number(relocatedCapital(r)))*20));
   const previous=labelEls?.get(r.id),gap=previous&&previous.style.display!=='none'?-3:3;
-  if(overview&&priority<6&&occupied.some(b=>Math.abs(b.x-pos.x)<(b.width+width)*.5+7+gap&&Math.abs(b.y-pos.y)<(cityUnrest.has(r.id)?64:cityAlerts.has(r.id)?47:35)+gap))continue;
-  occupied.push({...pos,width});
+  const x=diplomatic?pos.x+width*.5:pos.x;
+  const height=diplomatic?19:cityUnrest.has(r.id)?64:cityAlerts.has(r.id)?47:35;
+  if(overview&&priority<(diplomatic?7:6)&&occupied.some(b=>Math.abs(b.x-x)<(b.width+width)*.5+7+gap&&Math.abs(b.y-pos.y)<height+gap))continue;
+  occupied.push({x,y:pos.y,width});
   visible.set(r.id,c);
  }
  const realms=[];
@@ -2664,7 +2846,7 @@ function renderLabels(){
    if(!byOwner.has(r.owner))byOwner.set(r.owner,[]);
    byOwner.get(r.owner).push(r);
   }
-  for(const [owner,holdings] of byOwner)if(holdings.length>=3)realms.push({owner,holdings});
+  for(const [owner,holdings] of byOwner)if(diplomatic||holdings.length>=3)realms.push({owner,holdings});
  }
  if(labelEls&&labelMeta?.order===councilMapOrder&&labelMeta.signature===signature&&labelMeta.overview===overview){
   labelsJob=null;
@@ -2679,17 +2861,17 @@ function renderLabels(){
   }
   for(const [id,c] of visible){
    if(!labelEls.has(id)){
-    const el=makeSettlementLabel(c,{picking,overview});
+    const el=makeSettlementLabel(c,{picking,overview,diplomatic});
     layer.appendChild(el);
     labelEls.set(id,el);
    }
   }
   let realmWrapper=layer.querySelector('.label-realms');
   if(!realmWrapper){realmWrapper=document.createElement('div');realmWrapper.className='label-realms';layer.appendChild(realmWrapper)}
-  renderRealmLabels(realmWrapper,realms,markedCapitals,occupied);
+  renderRealmLabels(realmWrapper,realms,markedCapitals,occupied,diplomatic);
   let sea=layer.querySelector('.sea-label');
   if(cam.scale<=(sea?.style.display==='' ? .0082 : .0078)){
-   const [x,z,name]=GAME_MAP?.label||[160,110,'БАЛТИЙСКОЕ МОРЕ'];
+   const [x,z,name]=diplomatic?diplomaticAtlas.map.label:GAME_MAP?.label||[160,110,'БАЛТИЙСКОЕ МОРЕ'];
    const pos=project(x,z,-1);
    if(!sea){sea=document.createElement('div');sea.className='map-label sea-label';layer.appendChild(sea)}
    sea.style.left=pos.x+'px';sea.style.top=pos.y+'px';sea.textContent=name;sea.style.display='';
@@ -2702,12 +2884,12 @@ function renderLabels(){
    if(el){el.style.left=c.pos.x+'px';el.style.top=c.pos.y+'px'}
   }
   if(labelsJob?.signature!==signature||labelsJob?.overview!==overview||labelsJob?.order!==councilMapOrder){
-   labelsJob={layer,overview,picking,signature,order:councilMapOrder,els:new Map()};
+   labelsJob={layer,overview,picking,diplomatic,signature,order:councilMapOrder,els:new Map()};
   }
   Object.assign(labelsJob,{visible,realms,markedCapitals,occupied,pending:[...visible.values()].filter(c=>!labelsJob.els.has(c.r.id)),i:0});
  }
  $('atlas-needle').style.transform='rotate('+((cam.yaw||0)*180/Math.PI)+'deg)';
- $('atlas-scale').textContent=overview?'Обзор держав':cam.scale>.029?'Местность':'Герцогства';
+ $('atlas-scale').textContent=diplomatic?'Обзор держав':cam.scale>.029?'Местность':'Герцогства';
  dirtyLabels=false;
 }
 function labelStep(budget=6){
@@ -2723,10 +2905,10 @@ function labelStep(budget=6){
  const staging=document.createDocumentFragment();
  const realmWrapper=job.layer.querySelector('.label-realms')||document.createElement('div');
  realmWrapper.className='label-realms';
- renderRealmLabels(realmWrapper,job.realms,job.markedCapitals,job.occupied);
+ renderRealmLabels(realmWrapper,job.realms,job.markedCapitals,job.occupied,job.diplomatic);
  const sea=job.layer.querySelector('.sea-label');
  if(cam.scale<=(sea?.style.display==='' ? .0082 : .0078)){
-  const [x,z,name]=GAME_MAP?.label||[160,110,'БАЛТИЙСКОЕ МОРЕ'];
+  const [x,z,name]=job.diplomatic?diplomaticAtlas.map.label:GAME_MAP?.label||[160,110,'БАЛТИЙСКОЕ МОРЕ'];
   const pos=project(x,z,-1),el=document.createElement('div');
   el.className='map-label sea-label';
   el.style.left=pos.x+'px';el.style.top=pos.y+'px';el.textContent=name;
@@ -2750,6 +2932,72 @@ function labelStep(budget=6){
 let roadBuffer=null,trailBuffer=null,trafficBuffer=null,trafficRebuildAt=0,cartBuffer=null,selectedRouteBuffer=null,selectedRoutePath=null,simClock=0,lastFrame=null;
 function roadGround(x,z){return regionAt(state.regions,x,z)?surfaceHeight(x,z):-1.5}
 let roadMeshGraph=null,roadMeshEdges=0,roadExtensions=[];
+let riverBuffer=null,bridgeBuffer=null;
+function rebuildWaterways(){
+ if(!riverBuffer){
+  const vertices=[];
+  for(const [,,rank,line] of riverMap.lines){
+   const points=[line[0]];
+   for(let i=1;i<line.length;i++){
+    const [x,z]=line[i-1],dx=line[i][0]-x,dz=line[i][1]-z,steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/2.6));
+    for(let j=1;j<=steps;j++)points.push([x+dx*j/steps,z+dz*j/steps]);
+   }
+   const width=rank<=2?2.8:rank<=4?2.35:rank===5?1.85:1.24;
+   const sections=points.map(([x,z],index)=>{
+    const a=points[Math.max(0,index-1)],b=points[Math.min(points.length-1,index+1)];
+    const dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz)||1;
+    return {x,z,nx:-dz/length,nz:dx/length};
+   });
+   const profile=[[-1.14,.12,[.37,.38,.26]],[-.88,.17,[.28,.42,.41]],[0,.19,[.18,.33,.39]],
+    [.88,.17,[.30,.44,.42]],[1.14,.12,[.41,.41,.28]]];
+   const strips=sections.map(({x,z,nx,nz})=>{
+    const half=width*(.95+.08*Math.sin(x*.15+z*.12));
+    return profile.map(([side,lift,color])=>{
+     const xx=x+nx*half*side,zz=z+nz*half*side;
+     const height=regionAt(state.regions,xx,zz)?surfaceHeight(xx,zz):backgroundHeight(xx,zz);
+     return [xx,Math.max(-1,height)+lift,zz,color];
+    });
+   });
+   for(let i=1;i<strips.length;i++){
+    const a=sections[i-1],b=sections[i],mid={x:(a.x+b.x)/2,z:(a.z+b.z)/2};
+    if(!regionAt(state.regions,mid.x,mid.z)&&backgroundHeight(mid.x,mid.z)<-1)continue;
+    const left=strips[i-1],right=strips[i];
+    for(let j=1;j<profile.length;j++){
+     for(const p of [left[j-1],right[j-1],right[j],left[j-1],right[j],left[j]])vertex(vertices,...p);
+    }
+   }
+  }
+  riverBuffer=makeBuffer(vertices);
+ }
+ if(!riverMap.updateBridges(state.network,point=>!!regionAt(state.regions,point.x,point.z)))return;
+ if(bridgeBuffer)gl.deleteBuffer(bridgeBuffer.buffer);
+ const vertices=[];
+ for(const bridge of riverMap.bridges){
+  const {start,end,ux,uz,half}=bridge,stone=[.53,.47,.37],wood=[.42,.30,.19];
+  const point=(along,side,height)=>{
+   const x=bridge.x+ux*along-uz*side,z=bridge.z+uz*along+ux*side;
+   return [x,surfaceHeight(x,z)+height,z];
+  };
+  const deck=.53;
+  const boards=Math.ceil(half*4),spacing=half*2/boards;
+  for(let i=0;i<boards;i++){
+   const a=-half+i*spacing,b=a+spacing-.045;
+   quad(vertices,point(a,-1.21,deck),point(b,-1.21,deck),point(b,1.21,deck),point(a,1.21,deck),tint(wood,[1.06,.93,1][i%3]));
+  }
+  for(const side of [-1.26,1.26]){
+   for(let i=0;i<4;i++){
+    const a=-half+i*half*.5,b=a+half*.5;
+    timberBeam(vertices,point(a,side,deck+.30),point(b,side,deck+.30),.14,stone);
+   }
+   for(const offset of [-half,0,half]){
+    const [x,y,z]=point(offset,side,.24);
+    cube(vertices,x,y,z,.33,.62,.33,stone);
+   }
+  }
+  for(const bank of [start,end])cube(vertices,bank.x,surfaceHeight(bank.x,bank.z)+.18,bank.z,1.05,.29,1.05,stone);
+ }
+ bridgeBuffer=makeBuffer(vertices);
+}
 function rebuildRoads(){
  const graph=state.network;
  if(roadMeshGraph!==graph||graph&&graph.edges.size<roadMeshEdges){
@@ -2875,6 +3123,7 @@ function rebuildRoads(){
   }
  }
  trailBuffer=updateMeshBatch(trailBuffer,groups);
+ rebuildWaterways();
 }
 
 // Only the selected convoy gets a subtle line; reuse geometry until its path changes.
@@ -3007,15 +3256,16 @@ function drawFleet(){
   const heading=ship.path?routeHeading(ship.path,Math.min(1,(ship.elapsed+simClock)/ship.duration)):ship.heading||0;
   ship.heading=heading;
   const color=FACTION_COLORS[ship.owner]||FACTION_COLORS.you;
-  if(ship.path&&!ship.pinned)shipWake(vertices,point.x,point.z,heading,true,(ship.elapsed+simClock)*5);
-  placeShip(vertices,shipModel(color,true,cam.scale>=.006||ship===selectedWarship),point.x,-1.15,point.z,heading,.88);
+  const inland=inlandWater(point),level=waterLevel(point,inland),scale=inland?.46:.88;
+  if(ship.path&&!ship.pinned&&!inland&&!riverMap.offshoreAt(point))shipWake(vertices,point.x,point.z,heading,true,(ship.elapsed+simClock)*5);
+  placeShip(vertices,shipModel(color,true,cam.scale>=.006||ship===selectedWarship),point.x,level,point.z,heading,scale);
   const effects=[];
   if(ship.prize)cube(effects,-.65,1.24,-.45,.63,.45,.57,[.82,.65,.39]);
   if(ship.firing&&Math.floor(simClock*7)%3===0){
    cube(effects,0,1.15,-1.5,.55,.26,.55,[.96,.62,.25]);
    cube(effects,0,1.15,1.5,.55,.26,.55,[.96,.62,.25]);
   }
-  placeShip(vertices,effects,point.x,-1.15,point.z,heading,.88);
+  placeShip(vertices,effects,point.x,level,point.z,heading,scale);
  }
  if(!fleetBuffer) fleetBuffer={buffer:gl.createBuffer(),count:0};
  gl.bindBuffer(gl.ARRAY_BUFFER,fleetBuffer.buffer);
@@ -3045,7 +3295,7 @@ function renderFleet(){
    $('fleet-layer').appendChild(marker);
    fleetMarkers.set(ship,marker);
   }
-  const point=navalPosition(ship,simClock),screen=project(point.x,point.z,4.5);
+  const point=navalPosition(ship,simClock),screen=project(point.x,point.z,waterLevel(point)+5.65);
   marker.style.left=screen.x+'px';marker.style.top=screen.y+'px';
   marker.className='fleet-marker'+(ship===selectedWarship?' selected':'')+(ship.firing?' fighting':'')+(ship.owner!=='you'?' enemy':'');
   colorUnitMarker(marker,ship.owner);
@@ -3273,9 +3523,10 @@ function drawCarts(){
  if(atSea){
   if(navigableWater(p)){
    const heading=merchantDockHeading(ship,along,angle);
-   if(!ship.supplyBlocked&&along-ship.seaStart>3)shipWake(v,p.x,p.z,heading,false,phase);
+   const inland=inlandWater(p);
+   if(!inland&&!riverMap.offshoreAt(p)&&!ship.supplyBlocked&&along-ship.seaStart>3)shipWake(v,p.x,p.z,heading,false,phase);
    const detailedShip=ship===selectedCargo||ship.kind==='petition'||cam.scale>=.006&&(strategic||localDetail-- > 0);
-   placeShip(v,shipModel(factionColor,false,detailedShip),p.x,-1.15,p.z,heading);
+   placeShip(v,shipModel(factionColor,false,detailedShip),p.x,waterLevel(p,inland),p.z,heading,inland?.49:1);
   }
   continue;
  }
@@ -3684,6 +3935,13 @@ const armyBadgeShield='<span class="army-unit-emblem" aria-hidden="true"><svg vi
 const generalArmySwords='<svg class="general-army-swords" viewBox="0 0 32 32" aria-hidden="true"><use href="#ui-general-swords"/></svg>';
 function renderMarches(){
  const layer=$('army-layer'),items=[];
+ const diplomatic=mapView().cartographic;
+ const atlasLabels=diplomatic?[...$('labels').querySelectorAll('.diplomatic-city,.diplomatic-realm,.sea-label')]
+  .filter(el=>el.style.display!=='none').map(el=>{
+   const city=el.classList.contains('diplomatic-city'),size=parseFloat(el.style.fontSize)||16;
+   const width=el.textContent.length*(city?9.6:size*.73)+18;
+   return {x:parseFloat(el.style.left)-(city?4:width*.5),y:parseFloat(el.style.top),width,height:size+2,essential:city};
+  }):[];
  for(const region of state.regions){
   const g=state.garrisons?.[region.id];
   if(g&&g.troops>0&&g.owner===region.owner){
@@ -3721,28 +3979,53 @@ function renderMarches(){
  }
  for(const item of items){
   const {point,key,count,general,stack,stackIndex}=item;
+  const badgeWidth=general?82+count.length*6:58+count.length*4;
   const screen=project(point.x,point.z,roadGround(point.x,point.z)+6);
   item.position={...screen};
-  const nearSeat=!item.moving&&state.regions.find(r=>r.slots?.[0]&&Math.hypot(r.slots[0].x-point.x,r.slots[0].z-point.z)<=18);
+  const nearSeat=!diplomatic&&!item.moving&&state.regions.find(r=>r.slots?.[0]&&Math.hypot(r.slots[0].x-point.x,r.slots[0].z-point.z)<=18);
   if(nearSeat){
    const seat=nearSeat.slots[0],label=project(seat.x,seat.z,roadGround(seat.x,seat.z));
    if(Math.hypot(screen.x-label.x,screen.y-label.y)<34){screen.x=label.x;screen.y=label.y+24}
   }
   screen.x+=(stackIndex-(stack.size-1)*.5)*stack.spacing;
+  if(diplomatic){
+   const width=badgeWidth,original={...screen};
+   let alternate=null;
+   for(const [dx,dy] of [[18,-28],[-18,-28],[18,28],[-18,28],[0,-43],[0,43],[-37,-50],[37,50],
+    [-71,0],[71,0],[0,-66],[0,66],[-50,65],[50,-65],[-83,-24],[83,24],[-106,-45],[106,45],[-48,-86],[48,86]]){
+    const x=original.x+dx,y=original.y+dy;
+    if(!diplomaticAtlas.contains(x-width*.5,y,15)||!diplomaticAtlas.contains(x+width*.5,y,15))continue;
+    const collisions=atlasLabels.filter(label=>label.x+label.width>x-width*.5&&label.x<x+width*.5&&Math.abs(label.y-y)<(label.height+36)*.5+3);
+    if(collisions.length){
+     if(!alternate&&!collisions.some(label=>label.essential))alternate={x,y};
+     continue;
+    }
+    screen.x=x;screen.y=y;break;
+   }
+   if(alternate&&screen.x===original.x&&screen.y===original.y)Object.assign(screen,alternate);
+  }
   item.badge=screen;
   let element=marchElements.get(key);
   if(!element){
    element=document.createElement('button');
    element.type='button';
-   element.innerHTML=general?generalArmySwords+'<b></b>':armyBadgeShield+'<span class="army-unit-values"><small></small><b></b></span>';
+   element.innerHTML=general?'<span class="atlas-army-crest" aria-hidden="true"></span>'+generalArmySwords+'<b></b>':armyBadgeShield+'<span class="army-unit-values"><small></small><b></b></span>';
    element.addEventListener('pointerdown',event=>event.stopPropagation());
    element.addEventListener('click',event=>{event.stopPropagation();clickArmyBadge(element.armyItem,event)});
    layer.appendChild(element);marchElements.set(key,element);
   }
   element.armyItem=item;
-  element.className='march-badge'+(general?' general-army-badge':'')+(general&&item.owner!=='you'?' foreign-army':'')+
+  const dx=item.position.x-screen.x,dy=item.position.y-screen.y,stem=diplomatic?Math.hypot(dx,dy):0;
+  element.className='march-badge'+(general?' general-army-badge':'')+(general&&item.owner!=='you'?' foreign-army':'')+(stem?' atlas-callout':'')+
    (selectedKeys.has(key)?' selected':'')+(key.inBattle?' fighting':'');
   colorUnitMarker(element,item.owner,item.house);
+  if(diplomatic&&general){
+   const crest=element.querySelector('.atlas-army-crest'),capital=realmCapitalId(state,item.owner);
+   const heraldry=item.owner+':'+capital;
+   if(crest.dataset.heraldry!==heraldry){
+    crest.dataset.heraldry=heraldry;crest.innerHTML=heraldryShield(heraldry,18);
+   }
+  }
   const headcount=element.querySelector('b');
   const name=item.house?'Феодал':key.generalSlot?generalName(key.generalSlot):item.icon;
   if(!general){
@@ -3750,10 +4033,20 @@ function renderMarches(){
    if(commander.textContent!==name)commander.textContent=name;
   }
   if(headcount.textContent!==count)headcount.textContent=count;
-  const title=name+' · '+(key.inBattle?'Идёт бой':item.label)+' · '+item.troops+' солдат'+(item.house?' · '+vassalDisplayName(state,item.house)+(key.vassalOrder?' · '+key.vassalOrder:''):item.owner==='you'?' · нажмите, чтобы выбрать':'');
+  const bridge=!item.moving&&riverMap.bridgeAt(point);
+  const title=name+(bridge?' · Мост через '+bridge.river+' · −25% потерь':'')+' · '+(key.inBattle?'Идёт бой':item.label)+' · '+item.troops+' солдат'+(item.house?' · '+vassalDisplayName(state,item.house)+(key.vassalOrder?' · '+key.vassalOrder:''):item.owner==='you'?' · нажмите, чтобы выбрать':'');
   if(element.title!==title){element.title=title;element.setAttribute('aria-label',title)}
   element.style.left=screen.x+'px';element.style.top=screen.y+'px';
-  element.hidden=!!key.inBattle||screen.x<0||screen.y<0||screen.x>canvas.clientWidth||screen.y>canvas.clientHeight;
+  if(stem){
+   element.style.setProperty('--atlas-stem',stem+'px');
+   element.style.setProperty('--atlas-stem-angle',Math.atan2(dy,dx)+'rad');
+   element.style.setProperty('--atlas-dot-x',dx+'px');
+   element.style.setProperty('--atlas-dot-y',dy+'px');
+  }
+  const minor=diplomatic&&!general&&!selectedKeys.has(key)&&(item.selection.kind==='garrison'||item.troops<80);
+  element.hidden=!!key.inBattle||minor||(diplomatic&&!diplomaticAtlas.contains(item.position.x,item.position.y))||
+   screen.x<0||screen.y<0||screen.x>canvas.clientWidth||screen.y>canvas.clientHeight;
+  if(diplomatic&&!element.hidden)atlasLabels.push({x:screen.x-badgeWidth*.5,y:screen.y,width:badgeWidth,height:36,essential:true});
  }
  renderArmySelection(byKey);
 }
@@ -3818,7 +4111,7 @@ function inspectMapBuilding(region,building){
 }
 function buildingDetails(region,building){selectedBuilding={region,building};if(mode)selectMode(mode);updateBuildingDetails();showGain({x:building.x,z:building.z},'ВЫБРАНО','select')}
 function closeBuilding(){selectedBuilding=null;$('building-detail').hidden=true}
-function updateBuildingDetails(){let view=$('building-detail');if(!selectedBuilding){view.hidden=true;return}let {region,building:b}=selectedBuilding;if(region.owner!=='you'||!region.buildings.includes(b)){closeBuilding();return}view.hidden=false;let level=b.level||1;const workforce=workforceReport(region),job=workforce.byBuilding.get(b);$('building-kicker').textContent=(b.product||b.type==='city')?'ПОСТРОЙКА · УРОВЕНЬ '+level+' / 3':'ПОСТРОЙКА';$('building-name').textContent=TYPES[b.type].name;$('building-output').textContent=b.product?'Производство: '+(job?.rate||0).toFixed(1)+' ед./мин · работники '+(job?.workers||0)+' / '+buildingJobs(b)+' · '+LAND_NAMES[b.terrain]:(b.type==='city'?'Жители: '+Math.floor(b.population||0).toLocaleString(interfaceLocale)+' / '+cityHousing(b).toLocaleString(interfaceLocale)+' мест':'Морская торговля · рейсов: '+(state.economy?.tradeStats?.ports?.[region.id+':'+b.slotId]?.count||0)+' · выручка: '+(state.economy?.tradeStats?.ports?.[region.id+':'+b.slotId]?.revenue||0).toFixed(1)+' зл.');
+function updateBuildingDetails(){let view=$('building-detail');if(!selectedBuilding){view.hidden=true;return}let {region,building:b}=selectedBuilding;if(region.owner!=='you'||!region.buildings.includes(b)){closeBuilding();return}view.hidden=false;let level=b.level||1;const workforce=workforceReport(region),job=workforce.byBuilding.get(b);$('building-kicker').textContent=(b.product||b.type==='city')?'ПОСТРОЙКА · УРОВЕНЬ '+level+' / 3':'ПОСТРОЙКА';$('building-name').textContent=TYPES[b.type].name;$('building-output').textContent=b.product?'Производство: '+(job?.rate||0).toFixed(1)+' ед./мин · работники '+(job?.workers||0)+' / '+buildingJobs(b)+' · '+LAND_NAMES[b.terrain]:(b.type==='city'?'Жители: '+Math.floor(b.population||0).toLocaleString(interfaceLocale)+' / '+cityHousing(b).toLocaleString(interfaceLocale)+' мест':'Торговля по воде · рейсов: '+(state.economy?.tradeStats?.ports?.[region.id+':'+b.slotId]?.count||0)+' · выручка: '+(state.economy?.tradeStats?.ports?.[region.id+':'+b.slotId]?.revenue||0).toFixed(1)+' зл.');
  const staff=$('building-workforce');staff.hidden=!job||job.workers>=job.capacity;
  if(!staff.hidden)staff.textContent='Вакансий '+(job.capacity-job.workers)+' · в других постройках занято '+(workforce.employed-job.workers)+
   ' · свободно '+workforce.free+' · вне рабочей силы '+workforce.outsideWorkforce;
@@ -3847,7 +4140,7 @@ const launch=$('commission-warship');
   $('building-output').textContent+=' · снабжение: '+usingPort+' постр.';
  }
  const remove=$('building-demolish');remove.hidden=b===duchySeat(region)||!!b.capital;
- let q=upgradeCheck(state,region,b),button=$('building-upgrade');button.disabled=!q.ok;button.textContent=q.ok?'УЛУЧШИТЬ · '+q.cost+' ЗЛ.':q.cost?q.reason+' · '+q.cost+' ЗЛ.':q.reason;button.title=q.reason||'';$('building-note').textContent=q.nextHousing?'Жильё '+cityHousing(b)+' → '+q.nextHousing+' · рабочих мест '+buildingJobs(b)+' → '+q.nextJobs+' · довольство +2 к цели'+(b.capital?' · караваны '+level+' → '+(level+1):''):q.nextRate?'Рабочие места: '+buildingJobs(b)+' → '+buildingJobs({...b,level:level+1})+' · до '+q.nextRate+' ед./мин при полном штате и контроле':(b.type==='port'?'Портов соперников в мире: '+state.regions.filter(r=>r.coast&&state.factions?.[r.owner]&&!isAtWar(state,'you',r.owner)&&r.buildings.some(b=>b.type==='port')).length+'. Стоимость порта: '+TYPES.port.cost+' зл. Рейсы и выручка учитываются после доставки; цена морем выше на 50% до надбавки за расстояние. Путь и спрос нужны; местные купцы покупают груз, государство получает пошлину 15%. Караван выходит из столицы, затем грузит корабль.':b.product||b.type==='city'?'Постройка полностью улучшена':'Улучшение этого типа появится позже');
+ let q=upgradeCheck(state,region,b),button=$('building-upgrade');button.disabled=!q.ok;button.textContent=q.ok?'УЛУЧШИТЬ · '+q.cost+' ЗЛ.':q.cost?q.reason+' · '+q.cost+' ЗЛ.':q.reason;button.title=q.reason||'';$('building-note').textContent=q.nextHousing?'Жильё '+cityHousing(b)+' → '+q.nextHousing+' · рабочих мест '+buildingJobs(b)+' → '+q.nextJobs+' · довольство +2 к цели'+(b.capital?' · караваны '+level+' → '+(level+1):''):q.nextRate?'Рабочие места: '+buildingJobs(b)+' → '+buildingJobs({...b,level:level+1})+' · до '+q.nextRate+' ед./мин при полном штате и контроле':(b.type==='port'?(portWaterCell(b)?.river?'Речной порт · '+portWaterCell(b).river+'. ':'')+'Портов соперников в мире: '+state.regions.filter(r=>state.factions?.[r.owner]&&!isAtWar(state,'you',r.owner)&&r.buildings.some(b=>b.type==='port')).length+'. Стоимость порта: '+TYPES.port.cost+' зл. Рейсы и выручка учитываются после доставки; цена морем выше на 50% до надбавки за расстояние. Путь и спрос нужны; местные купцы покупают груз, государство получает пошлину 15%. Караван выходит из столицы, затем грузит корабль.':b.product||b.type==='city'?'Постройка полностью улучшена':'Улучшение этого типа появится позже');
  if(q.reason&&q.cost)button.title=q.reason+' · '+$('building-note').textContent;
  if(b.type==='city')$('building-output').textContent+=' · услуги '+(job?.workers||0)+' / '+buildingJobs(b)+' рабочих мест · развитие +'+(1+2*(level-1))+(b.capital?' · сухопутные караваны '+level:'');
  for(const id of ['building-output','building-note','building-workforce'])setGameStatText($(id),$(id).textContent);
@@ -4250,6 +4543,59 @@ gameSettings.onChange(settings=>{
 // Доступно из консоли как __simTimings.
 const simTimings={economy:0,surfaces:0,traffic:0,effects:0,ui:0,count:0,worstEconomy:0,worstSurfaces:0,worstTraffic:0,worstEffects:0,worstUi:0};
 globalThis.__simTimings=simTimings;
+function atlasBorderEdges(region){
+ if(atlasBoundaryCache.has(region.id))return atlasBoundaryCache.get(region.id);
+ const edges=[];
+ for(const ring of groundedBorderRings(region))for(let i=0;i<ring.length;i++){
+  const a=ring[i],b=ring[(i+1)%ring.length];
+  edges.push([a,b,borderNeighbor(region,a,b)]);
+ }
+ atlasBoundaryCache.set(region.id,edges);
+ return edges;
+}
+let atlasVisible=false,atlasWoodsQueued=false,paintedAtlasProgress=-1,paintedAtlasPitch=-1;
+function prepareAtlasWoods(){
+ if(atlasWoodsQueued||!diplomaticAtlas.ready||!mapImagesRegistered||loadedMapImages<totalMapImages)return;
+ const layers=[[coastalWoods?.crowns,woodlandAsset],[forestSpriteBuffer,woodlandAsset],
+  [forestSpriteBuffer.spruce,forestSpruceAsset],[forestSpriteBuffer.floodplain,floodplainAsset],[forestSpriteBuffer.scrub,oliveAsset]];
+ atlasWoodsQueued=true;
+ diplomaticAtlas.prepareWoods(layers.filter(([mesh,asset])=>mesh?.stamps.length&&asset?.image)
+  .map(([mesh,asset])=>({stamps:mesh.stamps,image:asset.image})));
+}
+function paintDiplomaticMap(view){
+ const {cartographic,opacity,paper,progress,atlasPitch}=view;
+ if(cartographic!==atlasVisible){
+  atlasVisible=cartographic;
+  $('app').classList.toggle('diplomatic-map',cartographic);
+ }
+ if(paintedAtlasPitch!==atlasPitch){
+  paintedAtlasPitch=atlasPitch;
+  dirtyLabels=true;
+ }
+ if(paintedAtlasProgress!==progress){
+  paintedAtlasProgress=progress;
+  dirtyLabels=true;
+  diplomaticAtlas.canvas.hidden=opacity===0;
+  diplomaticAtlas.canvas.style.opacity=String(opacity);
+  borderOverlayLayer.style.opacity=String(1-opacity);
+  const app=$('app');
+  app.classList.toggle('atlas-on-table',paper===1);
+  const labels=.2+.8*atlasEase(Math.min(1,Math.abs(progress-.44)/.20));
+  app.style.setProperty('--atlas-label-opacity',String(labels));
+  app.style.setProperty('--atlas-detail-opacity',String(1-opacity));
+ }
+ if(!opacity)return;
+ const selection=selectedArmy?[selectedArmy]:selectedGroup;
+ const routes=selection.map(item=>item.unit).filter(unit=>unit?.path?.length>1&&state.armyMoves.includes(unit)).map(unit=>unit.path);
+ diplomaticAtlas.render(view,state.regions,atlasBorderEdges,FACTION_COLORS,state.selected,routes,preferences.trees);
+}
+function drawDiplomaticMarkers(now){
+ if(dirtyLabels)renderLabels();
+ if(labelsJob&&labelStep(6))labelsJob=null;
+ renderMarches();
+ updateBattlePanel();renderSieges();renderOrderPing(now);
+ for(const [el,data] of mapFeedback)positionMapFeedback(el,data);
+}
 function draw(now=0){
  if(preferences.fpsLimit){
   if(now+.5<nextFrameAt){requestAnimationFrame(draw);return;}
@@ -4260,7 +4606,11 @@ function draw(now=0){
  if(globalThis.gameShell?.paused){lastFrame=now;requestAnimationFrame(draw);return}
  if(recapPlayback){drawCampaignReplay(now);requestAnimationFrame(draw);return}
  runVisualJobs();
- if(gl.stopped===true)return;resize();if(lastFrame!==null&&!document.hidden)updateCamera(Math.max(0,Math.min(.05,(now-lastFrame)/1000)));if(lastFrame!==null&&!document.hidden&&!warAlerts.length&&state.started&&globalThis.gameShell?.playing!==false&&!(state.campaign?.result&&!state.campaign.exploring)){simClock+=Math.max(0,Math.min(.25,(now-lastFrame)/1000));while(simClock>=1){const t0=performance.now();stepEconomy(state,1);const t1=performance.now();rebuildParcelSurfaces();const t2=performance.now();if(state.economy.roadTraffic?.size&&state.economy.seconds>=trafficRebuildAt)rebuildTrafficRoads();const t3=performance.now();drainEconomyEffects();const t4=performance.now();simClock-=1;updateUI();const t5=performance.now();simTimings.economy=t1-t0;simTimings.surfaces=t2-t1;simTimings.traffic=t3-t2;simTimings.effects=t4-t3;simTimings.ui=t5-t4;simTimings.count++;if(t1-t0>simTimings.worstEconomy)simTimings.worstEconomy=t1-t0;if(t2-t1>simTimings.worstSurfaces)simTimings.worstSurfaces=t2-t1;if(t3-t2>simTimings.worstTraffic)simTimings.worstTraffic=t3-t2;if(t4-t3>simTimings.worstEffects)simTimings.worstEffects=t4-t3;if(t5-t4>simTimings.worstUi)simTimings.worstUi=t5-t4}}lastFrame=now;if(!document.hidden&&!warAlerts.length&&globalThis.gameShell?.playing!==false)runQueuedBotActions();const rs=performance.now();gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.uniform2f(loc.center,cam.x,cam.z);gl.uniform2f(loc.size,canvas.width,canvas.height);gl.uniform1f(loc.scale,cam.scale);cameraUniforms(loc);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,groundAsset.texture);gl.activeTexture(gl.TEXTURE0+1);gl.bindTexture(gl.TEXTURE_2D,waterAsset.texture);gl.uniform1i(loc.ground,0);gl.uniform1i(loc.waterMap,1);
+ if(gl.stopped===true)return;resize();if(lastFrame!==null&&!document.hidden)updateCamera(Math.max(0,Math.min(.05,(now-lastFrame)/1000)));if(lastFrame!==null&&!document.hidden&&!warAlerts.length&&state.started&&globalThis.gameShell?.playing!==false&&!(state.campaign?.result&&!state.campaign.exploring)){simClock+=Math.max(0,Math.min(.25,(now-lastFrame)/1000));while(simClock>=1){const t0=performance.now();stepEconomy(state,1);const t1=performance.now();rebuildParcelSurfaces();const t2=performance.now();if(state.economy.roadTraffic?.size&&state.economy.seconds>=trafficRebuildAt)rebuildTrafficRoads();const t3=performance.now();drainEconomyEffects();const t4=performance.now();simClock-=1;updateUI();const t5=performance.now();simTimings.economy=t1-t0;simTimings.surfaces=t2-t1;simTimings.traffic=t3-t2;simTimings.effects=t4-t3;simTimings.ui=t5-t4;simTimings.count++;if(t1-t0>simTimings.worstEconomy)simTimings.worstEconomy=t1-t0;if(t2-t1>simTimings.worstSurfaces)simTimings.worstSurfaces=t2-t1;if(t3-t2>simTimings.worstTraffic)simTimings.worstTraffic=t3-t2;if(t4-t3>simTimings.worstEffects)simTimings.worstEffects=t4-t3;if(t5-t4>simTimings.worstUi)simTimings.worstUi=t5-t4}}lastFrame=now;if(!document.hidden&&!warAlerts.length&&globalThis.gameShell?.playing!==false)runQueuedBotActions();
+ prepareAtlasWoods();updateAtlasPresentation(now);
+ const view=mapView();paintDiplomaticMap(view);
+ if(view.opacity===1){drawDiplomaticMarkers(now);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw);return}
+ const rs=performance.now();gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.uniform2f(loc.center,cam.x,cam.z);gl.uniform2f(loc.size,canvas.width,canvas.height);gl.uniform1f(loc.scale,mapView().scale);cameraUniforms(loc);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,groundAsset.texture);gl.activeTexture(gl.TEXTURE0+1);gl.bindTexture(gl.TEXTURE_2D,waterAsset.texture);gl.uniform1i(loc.ground,0);gl.uniform1i(loc.waterMap,1);
  gl.activeTexture(gl.TEXTURE0+12);gl.bindTexture(gl.TEXTURE_2D,paintedMaterials.texture);
  gl.activeTexture(gl.TEXTURE0+14);gl.bindTexture(gl.TEXTURE_2D,habitatAsset.texture);
  gl.activeTexture(gl.TEXTURE0+13);gl.bindTexture(gl.TEXTURE_2D,parcelAnchorTexture);
@@ -4271,7 +4621,7 @@ function draw(now=0){
  if(urbanPaint){gl.activeTexture(gl.TEXTURE0+11);gl.bindTexture(gl.TEXTURE_2D,urbanPaint.texture)}
  if(andalusiaAsset){gl.activeTexture(gl.TEXTURE0+3);gl.bindTexture(gl.TEXTURE_2D,andalusiaAsset.texture)}
  gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,materialsAsset.texture);gl.uniform1i(loc.materialMap,4);gl.uniform1f(loc.materialsReady,materialsAsset.ready?(closeGroundAsset.ready?(paintedMaterials.ready&&habitatAsset.ready&&meadowBrushAsset.ready?3:2):1):0);
- gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(.0065-cam.scale*WORLD_SCALE)/.004)),hasStencil=gl.getContextAttributes?.()?.stencil!==false;gl.uniform1f(loc.terrainDetail,-1);drawBuffer(basemap.table);gl.uniform1f(loc.terrainDetail,1);
+ gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(ATLAS_TILT_START-cam.scale)/(ATLAS_TILT_START-ATLAS_ENTER_ZOOM))),hasStencil=gl.getContextAttributes?.()?.stencil!==false;gl.uniform1f(loc.terrainDetail,-1);drawBuffer(basemap.table);gl.uniform1f(loc.terrainDetail,1);
  if(hasStencil){gl.clearStencil(0);gl.stencilMask(255);gl.clear(gl.STENCIL_BUFFER_BIT);gl.enable(gl.STENCIL_TEST);gl.stencilFunc(gl.ALWAYS,1,255);gl.stencilOp(gl.KEEP,gl.KEEP,gl.REPLACE)}else{drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1)}
  gl.activeTexture(gl.TEXTURE0+6);gl.bindTexture(gl.TEXTURE_2D,parcelIndexAsset.texture);gl.uniform1i(loc.parcelIndex,6);gl.activeTexture(gl.TEXTURE0+7);gl.bindTexture(gl.TEXTURE_2D,parcelStyleTexture);gl.uniform1i(loc.parcelStyle,7);gl.uniform2f(loc.parcelIndexSize,parcelIndexAsset.width,parcelIndexAsset.height);gl.uniform1f(loc.parcelIndexReady,parcelIndexAsset.ready?1:0);gl.uniform1f(loc.showPlotBorders,mode?1:0);
  const focus=ghostPlot||(!mode&&selectedBuilding?{slot:selectedBuilding.building.slotId,region:selectedBuilding.region.id}:null);
@@ -4283,7 +4633,7 @@ function draw(now=0){
   if(hasWave)gl.uniform1f(loc.captureStrength,0);
  }gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.paintPlots,0);
  if(hasStencil){gl.stencilMask(0);gl.stencilFunc(gl.EQUAL,0,255);drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.disable(gl.STENCIL_TEST);gl.stencilMask(255)}
- gl.uniform1f(loc.terrainDetail,0);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);gl.enable(gl.BLEND);gl.depthMask(false);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.depthMask(true);gl.disable(gl.BLEND);gl.uniform1f(loc.roadDetail,0);drawSelectedRoute();drawBorders(now);if(preferences.trees)drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer);drawMeshBatch(buildingsBuffer);drawFortifications();drawWorkshopActivity(now);actorShadowVertices.length=0;drawCarts();drawFleet();drawMarches();drawBattles(now);if(actorShadowVertices.length)drawForest(true);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw)}
+ gl.uniform1f(loc.terrainDetail,0);gl.disable(gl.DEPTH_TEST);gl.depthMask(false);drawBuffer(riverBuffer);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);gl.enable(gl.BLEND);gl.depthMask(false);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.depthMask(true);gl.disable(gl.BLEND);gl.uniform1f(loc.roadDetail,0);drawBuffer(bridgeBuffer);drawSelectedRoute();drawBorders(now);if(preferences.trees)drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer);drawMeshBatch(buildingsBuffer);drawFortifications();drawWorkshopActivity(now);actorShadowVertices.length=0;drawCarts();drawFleet();drawMarches();drawBattles(now);if(actorShadowVertices.length)drawForest(true);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw)}
 function flash(msg){const t=$('toast');t.textContent=msg;t.classList.add('visible');clearTimeout(flash.t);flash.t=setTimeout(()=>t.classList.remove('visible'),2600)}
 function setSelected(region,tab){
  if(state.selected!==region)hideActionExplanation();
@@ -4418,7 +4768,7 @@ function start(r,preset=null,match=null){
  state.onCampaignEnd=onCampaignEnd;
  state.onCampaignCountdown=onCampaignCountdown;
  if(preset)applyCampaignStart(r,preset);
- state.onSeaDelivery=recordHarborDelivery;state.onSupplyDispatched=onSupplyDispatched;state.onRecruitmentFinished=onRecruitmentFinished;state.navalBerth=portWaterCell;state.navalPath=navalCourse;state.navalLine=waterSegment;state.planNavalDefense=planNavalDefense;state.onNavalEvent=onNavalEvent;state.dispatchBotSeaTrade=dispatchBotSeaTrade;state.armyTerritoryAt=p=>regionAt(state.regions,p.x,p.z);state.roadNodeLocation=roadNodeLocation;state.nearestRoadLocation=nearestRoadLocation;state.roadRouteBetween=roadRouteBetween;state.armyRoadRouteBetween=(g,from,to,owner)=>roadRouteBetween(g,from,to,armyEdgeFilter(state,owner));state.armyPath=(from,to,owner)=>{let a=state.network.hubKeys.get(from.id),b=state.network.hubKeys.get(to.id);return networkPath(state.network,a,b,armyEdgeFilter(state,owner))||networkPath(state.network,a,b)};state.onNotification=renderNotifications;state.onWarDeclared=onWarDeclared;state.onPeaceSigned=onPeaceSigned;state.onFoodWarning=onFoodWarning;state.onArmyChanged=onArmyChanged;state.onBattleChanged=onBattleChanged;state.onDuchyCaptured=onDuchyCaptured;state.onPlayerDefeated=onPlayerDefeated;state.onRebellion=onRebellion;state.planRevoltDefense=planRevoltDefense;state.onSiegeChanged=onSiegeChanged;state.onGateEvent=onGateEvent;state.onMarketsReady=onMarketsReady;state.onArmoriesReady=onArmoriesReady;state.councilPortSite=site=>!!portWaterCell(site);state.councilMarketOutlook=councilMarketOutlook;state.councilPortOutlook=councilPortOutlook;state.onCouncilProject=onCouncilProject;state.onCouncilUpgrade=onCouncilUpgrade;state.onCouncilRelief=onCouncilRelief;state.onShipmentRaided=onShipmentRaided;state.onTradeDispatched=onTradeDispatched;state.planMerchantReturn=ship=>refreshMerchantConvoy(ship,shipmentOwner(ship));state.retargetLandExport=retargetLandExport;state.planConvoyDestination=planConvoyDestination;state.onTradeReturned=()=>flash('Сделка отменена · караван возвращает груз');state.raidPath=routeToFactionCapital;state.dispatchTrade=dispatchTrade;state.developBot=developBot;const botCadenceCache=new Map();state.botCadence=id=>{let tick=Math.floor((state.economy?.seconds||0)/2),cached=botCadenceCache.get(id);if(!cached||cached.tick!==tick){cached={tick,value:strategyCadence(state,id)};botCadenceCache.set(id,cached)}return cached.value};const petitionPaths=new Map();state.petitionPath=(owner,region)=>{let best=null,bestLength=Infinity;for(const source of state.regions){if(source.owner!==owner||!(source.adj.includes(region.id)||region.adj.includes(source.id)))continue;let key=source.id+':'+region.id;if(!petitionPaths.has(key))petitionPaths.set(key,networkPath(state.network,state.network.hubKeys.get(source.id),state.network.hubKeys.get(region.id)));let path=petitionPaths.get(key);if(path&&routeLength(path)<bestLength){best=path;bestLength=routeLength(path);best.originRegionId=source.id}}return best};state.evacuateSettledDuchy=evacuateSettledDuchy;state.onPetitionResult=onPetitionResult;state.planBotPetition=planBotPetition;state.onGarrisonChanged=onGarrisonChanged;state.onRecruitmentInterrupted=(order,region)=>{if(order.owner==='you')addNotice('danger','Набор прерван',(region?.name||'Герцогство')+' потеряно; жители вернулись в города.',region?.id)};state.recruitBot=recruitBot;state.planBotWar=planBotWar;state.planBotDiplomacy=planBotDiplomacy;state.planBotCouncil=planBotCouncil;
+ state.onSeaDelivery=recordHarborDelivery;state.onSupplyDispatched=onSupplyDispatched;state.onRecruitmentFinished=onRecruitmentFinished;state.navalBerth=portWaterCell;state.navalPath=navalCourse;state.navalLine=waterSegment;state.planNavalDefense=planNavalDefense;state.onNavalEvent=onNavalEvent;state.dispatchBotSeaTrade=dispatchBotSeaTrade;state.armyTerritoryAt=p=>regionAt(state.regions,p.x,p.z);state.roadNodeLocation=roadNodeLocation;state.nearestRoadLocation=nearestRoadLocation;state.roadRouteBetween=roadRouteBetween;state.armyRoadRouteBetween=(g,from,to,owner)=>roadRouteBetween(g,from,to,armyEdgeFilter(state,owner));state.armyPath=(from,to,owner)=>{let a=state.network.hubKeys.get(from.id),b=state.network.hubKeys.get(to.id);return networkPath(state.network,a,b,armyEdgeFilter(state,owner))||networkPath(state.network,a,b)};state.onNotification=renderNotifications;state.onWarDeclared=onWarDeclared;state.onPeaceSigned=onPeaceSigned;state.onFoodWarning=onFoodWarning;state.onArmyChanged=onArmyChanged;state.onBattleChanged=onBattleChanged;state.onDuchyCaptured=onDuchyCaptured;state.onPlayerDefeated=onPlayerDefeated;state.onRebellion=onRebellion;state.planRevoltDefense=planRevoltDefense;state.onSiegeChanged=onSiegeChanged;state.onGateEvent=onGateEvent;state.onMarketsReady=onMarketsReady;state.onArmoriesReady=onArmoriesReady;state.councilPortSite=site=>!!portWaterCell(site);state.portSite=(region,site)=>!!portWaterCell(site);state.bridgeAt=point=>riverMap.bridgeAt(point);state.bridgeDefense=BRIDGE_DEFENSE;state.councilMarketOutlook=councilMarketOutlook;state.councilPortOutlook=councilPortOutlook;state.onCouncilProject=onCouncilProject;state.onCouncilUpgrade=onCouncilUpgrade;state.onCouncilRelief=onCouncilRelief;state.onShipmentRaided=onShipmentRaided;state.onTradeDispatched=onTradeDispatched;state.planMerchantReturn=ship=>refreshMerchantConvoy(ship,shipmentOwner(ship));state.retargetLandExport=retargetLandExport;state.planConvoyDestination=planConvoyDestination;state.onTradeReturned=()=>flash('Сделка отменена · караван возвращает груз');state.raidPath=routeToFactionCapital;state.dispatchTrade=dispatchTrade;state.developBot=developBot;const botCadenceCache=new Map();state.botCadence=id=>{let tick=Math.floor((state.economy?.seconds||0)/2),cached=botCadenceCache.get(id);if(!cached||cached.tick!==tick){cached={tick,value:strategyCadence(state,id)};botCadenceCache.set(id,cached)}return cached.value};const petitionPaths=new Map();state.petitionPath=(owner,region)=>{let best=null,bestLength=Infinity;for(const source of state.regions){if(source.owner!==owner||!(source.adj.includes(region.id)||region.adj.includes(source.id)))continue;let key=source.id+':'+region.id;if(!petitionPaths.has(key))petitionPaths.set(key,networkPath(state.network,state.network.hubKeys.get(source.id),state.network.hubKeys.get(region.id)));let path=petitionPaths.get(key);if(path&&routeLength(path)<bestLength){best=path;bestLength=routeLength(path);best.originRegionId=source.id}}return best};state.evacuateSettledDuchy=evacuateSettledDuchy;state.onPetitionResult=onPetitionResult;state.planBotPetition=planBotPetition;state.onGarrisonChanged=onGarrisonChanged;state.onRecruitmentInterrupted=(order,region)=>{if(order.owner==='you')addNotice('danger','Набор прерван',(region?.name||'Герцогство')+' потеряно; жители вернулись в города.',region?.id)};state.recruitBot=recruitBot;state.planBotWar=planBotWar;state.planBotDiplomacy=planBotDiplomacy;state.planBotCouncil=planBotCouncil;
  state.councilDiplomacyRoute=(owner,other)=>routeToHub(state.network,state.network.hubKeys.get(realmCapitalId(state,owner)),state.network.hubKeys.get(realmCapitalId(state,other)),supplyFilterFor(owner));if(match?.malagaView!=null)applyMalagaStart(r,match.malagaView);
  state.dispatchVassalTrade=(vassal,lands)=>dispatchTrade(vassal.owner,vassal,lands);
  state.onVassalGranted=region=>refreshCapitalRoutes(false,new Set([region.owner]));
@@ -5467,8 +5817,8 @@ function planBotPetition(id){
 function botPortPlans(id){
  let f=state.factions?.[id];if(!f||f.defeated||f.isRebel||!state.network||isAtWar(state,'you',id))return [];
  let owned=state.regions.filter(r=>r.owner===id);if(owned.some(r=>r.buildings.some(b=>b.type==='port')))return [];
- let playerPorts=state.regions.filter(r=>r.owner==='you'&&r.coast&&r.buildings.some(b=>b.type==='port')),candidates=[];
- for(const r of owned.filter(r=>r.coast))for(const slot of r.slots){if(r.buildings.some(b=>b.slotId===slot.id))continue;let water=portWaterCell(slot);if(water)candidates.push({region:r,slot,water,shoreDistance:distance(slot,water)})}
+ let playerPorts=state.regions.filter(r=>r.owner==='you'&&r.buildings.some(b=>b.type==='port')),candidates=[];
+ for(const r of owned)for(const slot of r.slots){if(r.buildings.some(b=>b.slotId===slot.id))continue;let water=portWaterCell(slot);if(water)candidates.push({region:r,slot,water,shoreDistance:distance(slot,water)})}
  candidates.sort((a,b)=>a.shoreDistance-b.shoreDistance||a.region.id-b.region.id||a.slot.id-b.slot.id);let fallback=null;
  for(const candidate of candidates){let {region:r,slot,water,shoreDistance}=candidate,port={type:'port',x:slot.x,z:slot.z,slotId:slot.id,scale:slot.scale,terrain:slot.terrain,level:1};port.route=attachSupplyRoute(r,port,id);if(!port.route)continue;
   let plan={region:r,port,reachable:false,shoreDistance};fallback??=plan;
@@ -5522,10 +5872,8 @@ function waterRoute(port, targetPort) {
  const key = [port.x,port.z,targetPort.x,targetPort.z].join(':');
  const reverse = [targetPort.x,targetPort.z,port.x,port.z].join(':');
  if (!cache.has(key)){
-  if(GAME_MAP){
-   const start=portWaterCell(port),end=portWaterCell(targetPort);
-   cache.set(key,start&&end?navalCourse(start,end):null);
-  }else cache.set(key,findWaterRoute(port,targetPort));
+  const start=portWaterCell(port),end=portWaterCell(targetPort);
+  cache.set(key,start&&end?navalCourse(start,end):null);
   if(!cache.has(reverse))cache.set(reverse,cache.get(key)?.slice().reverse()||null);
  }
  return cache.get(key);
@@ -5536,36 +5884,56 @@ function navalNavigator(step=1.45*WORLD_SCALE){
  if(!campaignNavigators.has(step)) campaignNavigators.set(step,new SeaNavigator({size:[WORLD_WIDTH,WORLD_HEIGHT],gridKm:step,land:SCENARIO_LAND,gridBounds:GAME_MAP.bounds,heuristicWeight:1.08,clearance:SHIP_CLEARANCE}));
  return campaignNavigators.get(step);
 }
-function navigableWater(point){
- if(GAME_MAP)return isSeaBackground(point.x,point.z)&&navalNavigator().clearSegment([point.x,point.z],[point.x,point.z]);
+function legacyBalticWater(point){
  return point.x>=0&&point.x<=784&&point.z>=0&&point.z<=280&&isSeaBackground(point.x,point.z)&&!regionAt(state.regions,point.x,point.z)&&coastDistance(point.x,point.z)>=SHIP_CLEARANCE;
 }
+function openWater(point){
+ if(GAME_MAP)return isSeaBackground(point.x,point.z)&&navalNavigator().clearSegment([point.x,point.z],[point.x,point.z]);
+ return legacyBalticWater(point)||riverMap.offshoreAt(point);
+}
+function riverSailing(point){return openWater(point)&&!point.river?null:riverMap.channelAt(point)}
+function inlandWater(point){return riverSailing(point)||!openWater(point)&&riverMap.openingAt(point)}
+function navigableWater(point){return openWater(point)||!!riverMap.channelAt(point)||!!riverMap.openingAt(point)}
+function waterLevel(point,inland=inlandWater(point)){
+ const {x,z}=point;
+ const height=regionAt(state.regions,x,z)?surfaceHeight(x,z):backgroundHeight(x,z);
+ return inland?Math.max(-1,height)+.20:-1.15;
+}
 
-function waterSegment(from,to){
- if(GAME_MAP)return navigableWater(from)&&navigableWater(to)&&navalNavigator().clearSegment([from.x,from.z],[to.x,to.z]);
+function openWaterSegment(from,to){
+ if(GAME_MAP)return openWater(from)&&openWater(to)&&navalNavigator().clearSegment([from.x,from.z],[to.x,to.z]);
  const steps=Math.max(1,Math.ceil(distance(from,to)));
  for(let i=0;i<=steps;i++){
   const t=i/steps;
   const x=from.x+(to.x-from.x)*t,z=from.z+(to.z-from.z)*t;
-  if(!navigableWater({x,z})||(i>0&&i<steps&&coastDistance(x,z)<SHIP_CLEARANCE+.5)) return false;
+  if(!openWater({x,z})||(i>0&&i<steps&&coastDistance(x,z)<SHIP_CLEARANCE+.5&&!riverMap.offshoreAt({x,z}))) return false;
+ }
+ return true;
+}
+function waterSegment(from,to){
+ if(openWaterSegment(from,to))return true;
+ const steps=Math.max(1,Math.ceil(distance(from,to)/1.4));
+ for(let i=0;i<=steps;i++){
+  const f=i/steps,p={x:from.x+(to.x-from.x)*f,z:from.z+(to.z-from.z)*f};
+  if(!navigableWater(p))return false;
  }
  return true;
 }
 
-function nearestNavalCell(point){
- const x0=Math.round(point.x/14)*14, z0=Math.round(point.z/14)*14;
+function nearestNavalCell(point,step=14){
+ const x0=Math.round(point.x/step)*step,z0=Math.round(point.z/step)*step;
  let best=null, shortest=Infinity;
- for(let dx=-28;dx<=28;dx+=14) for(let dz=-28;dz<=28;dz+=14){
+ for(let dx=-step*2;dx<=step*2;dx+=step) for(let dz=-step*2;dz<=step*2;dz+=step){
   const cell={x:x0+dx,z:z0+dz};
   const length=distance(point,cell);
-  if(length<shortest&&waterSegment(point,cell)){best=cell;shortest=length}
+  if(length<shortest&&openWaterSegment(point,cell)){best=cell;shortest=length}
  }
  return best;
 }
 
-function navalCourse(from,to){
+function openSeaCourse(from,to){
  if(GAME_MAP){
-  if(!from||!to||!navigableWater(from)||!navigableWater(to))return null;
+  if(!from||!to||!openWater(from)||!openWater(to))return null;
   const a=[from.x,from.z],b=[to.x,to.z];
   let result=navalNavigator().route(a,b);
   const direct=distance(from,to);
@@ -5575,28 +5943,74 @@ function navalCourse(from,to){
   }
   return result?.points.map(([x,z])=>({x,z}))||null;
  }
- if(!from||!to||!navigableWater(from)||!navigableWater(to)) return null;
- if(waterSegment(from,to)) return [from,to];
- const start=nearestNavalCell(from), end=nearestNavalCell(to);
- if(!start||!end) return null;
- const water=distance(start,end)<1e-8?[start]:waterRoute(start,end);
- return water?[from,...water,to].filter((p,i,route)=>!i||distance(p,route[i-1])>1e-8):null;
+ if(!from||!to||!openWater(from)||!openWater(to)) return null;
+ if(openWaterSegment(from,to)) return [from,to];
+ const steps=riverMap.offshoreAt(from)&&riverMap.offshoreAt(to)&&distance(from,to)<220?[14,5]:[14];
+ for(const step of steps){
+  const start=nearestNavalCell(from,step),end=nearestNavalCell(to,step);
+  if(!start||!end)continue;
+  const water=distance(start,end)<1e-8?[start]:findWaterRoute(start,end,step);
+  if(water)return [from,...water,to].filter((p,i,route)=>!i||distance(p,route[i-1])>1e-8);
+ }
+ return null;
 }
 
-function findWaterRoute(port, targetPort) {
- const start = portWaterCell(port), end = portWaterCell(targetPort);
- if (!start || !end) return null;
+function riverSeaConnection(system){
+ const channel=riverMap.systems[system];
+ if(channel.sea!==undefined)return channel.sea;
+ const {mouth,outlet}=channel;
+ if(!outlet)return channel.sea=null;
+ const radius=GAME_MAP?40:58;
+ const cacheOpening=point=>{
+  channel.sea=[mouth,point].filter((p,i,path)=>!i||distance(p,path[i-1])>.001);
+  riverMap.addOpening(system,[outlet,...channel.sea]);
+  return channel.sea;
+ };
+ for(let range=0;range<=radius;range+=2.5){
+  for(let i=0;i<(range?16:1);i++){
+   const angle=i*Math.PI/8,p={x:mouth.x+range*Math.cos(angle),z:mouth.z+range*Math.sin(angle)};
+   if(openWater(p)&&(!GAME_MAP?nearestNavalCell(p):true))return cacheOpening(p);
+  }
+ }
+ return channel.sea=null;
+}
+function navalCourse(from,to){
+ if(!from||!to)return null;
+ const fromChannel=riverSailing(from),toChannel=riverSailing(to);
+ if(fromChannel&&fromChannel.segment===toChannel?.segment){
+  return [from,{x:fromChannel.x,z:fromChannel.z},{x:toChannel.x,z:toChannel.z},to]
+   .filter((point,i,path)=>!i||distance(point,path[i-1])>.001);
+ }
+ const left=riverMap.downstream(from,fromChannel),right=riverMap.downstream(to,toChannel);
+ if(left&&right&&left.system===right.system){
+  const a=left.path,b=right.path;
+  let i=a.length-1,j=b.length-1;
+  while(i>=0&&j>=0&&distance(a[i],b[j])<.001){i--;j--}
+  return [...a.slice(0,i+2),...b.slice(0,j+1).reverse()];
+ }
+ const fromOpening=!left&&!openWater(from)&&riverMap.openingAt(from);
+ const toOpening=!right&&!openWater(to)&&riverMap.openingAt(to);
+ const a=left?riverSeaConnection(left.system):fromOpening?[from,fromOpening.location,...fromOpening.path.slice(fromOpening.i)]:[from];
+ const b=right?riverSeaConnection(right.system):toOpening?[to,toOpening.location,...toOpening.path.slice(toOpening.i)]:[to];
+ if(!a||!b)return null;
+ const sea=openSeaCourse(a.at(-1),b.at(-1));
+ if(!sea)return null;
+ return [...(left?.path||[]),...a,...sea,...b.slice().reverse(),...(right?.path.slice().reverse()||[])]
+  .filter((point,i,path)=>!i||distance(point,path[i-1])>.001);
+}
+
+function findWaterRoute(start,end,step) {
  const key = p => p.x + ',' + p.z;
  const cells = state._seaWaterCells ??= new Map();
  function water(x,z) {
   const id=x+','+z;
-  if(!cells.has(id)) cells.set(id,navigableWater({x,z}));
+  if(!cells.has(id)) cells.set(id,openWater({x,z}));
   return cells.get(id);
  }
  const queue=[start], previous=new Map([[key(start),null]]);
- const neighbors = p => [[14,0],[-14,0],[0,14],[0,-14]]
+ const neighbors = p => [[step,0],[-step,0],[0,step],[0,-step]]
   .map(([dx,dz])=>({x:p.x+dx,z:p.z+dz}))
-  .filter(q=>water(q.x,q.z)&&waterSegment(p,q));
+  .filter(q=>water(q.x,q.z)&&openWaterSegment(p,q));
  if (key(start)===key(end)) {
   const neighbor=neighbors(start)[0];
   return neighbor?[start,neighbor,end]:null;
@@ -5711,7 +6125,7 @@ function tradeOffersFor(state,id,owner='you',range=tradeRange(state,owner),vassa
  const ports=lands.filter(r=>r.buildings.some(b=>b.type==='port'));
  const charter=!vassal&&campaignPortCharter(state,owner);
  if(charter)ports.push(charter.region);
- const destinations=state.regions.filter(r=>r.owner===id&&r.coast&&r.buildings.some(b=>b.type==='port'));
+ const destinations=state.regions.filter(r=>r.owner===id&&r.buildings.some(b=>b.type==='port'));
  for(const home of ports){
   let sea=null,shortest=Infinity;
   for(const coast of destinations){
@@ -5960,7 +6374,7 @@ let ghostPlot=null;
 function clearGhost(){ghostPlot=null;if(ghostBuffer)gl.deleteBuffer(ghostBuffer.buffer);ghostBuffer=null}
 function updateGhost(p){hover=p;clearGhost();if(!mode||!p){$('placement').hidden=true;return}let region=p.region??regionAt(state.regions,p.x,p.z),parcel=slotAt(region,p.x,p.z),target=parcel||p;const c=buildCheck(state,mode,target.x,target.z);$('placement').hidden=false;if(c.ok){const label=c.product?`${LAND_NAMES[c.terrain]} · <strong>до ${c.product.rate} ед./мин</strong> · ${buildingJobs({type:mode})} рабочих мест (${Math.round((c.product.multiplier-1)*100)>=0?'+':''}${Math.round((c.product.multiplier-1)*100)}%)`:'1 графство под застройку';$('placement').innerHTML=`<strong>${TYPES[mode].name}</strong> · ${label} · ${c.cost} зл.`}else $('placement').innerHTML=`<strong>${TYPES[mode].name}</strong> · <span class="bad">${c.reason}</span>`;{let v=[],land=regionAt(state.regions,target.x,target.z);if(parcel&&land)ghostPlot={region:land.id,slot:parcel.id,valid:c.ok};if(parcel&&land.buildings.some(b=>b.slotId===parcel.id))return;addBuilding(v,{type:mode,x:target.x,z:target.z,scale:parcel?.scale,farmForm:farmFormFor(land,parcel?.id),groundY:land?surfaceHeight(target.x,target.z):0},c.ok?[.72,.83,.45]:[.85,.38,.32]);ghostBuffer=makeBuffer(v)}}
 const battlePanels=new Map();
-function updateBattlePanel(){const battles=state.battlePairs||[],layer=$('battle-layer'),live=new Set(battles);for(const [battle,el] of battlePanels)if(!live.has(battle)){el.remove();battlePanels.delete(battle)}for(const battle of battles){let el=battlePanels.get(battle);if(!el){el=document.createElement('section');el.className='battle-panel';el.setAttribute('aria-label','Ход сражения');layer.appendChild(el);battlePanels.set(battle,el)}let a=battle.totalA||0,b=battle.totalB||0,total=a+b,ratio=total?Math.max(3,Math.min(97,a/total*100)):50,nearest=state.regions.reduce((best,r)=>!best||distance(r.slots[0],battle.point)<distance(best.slots[0],battle.point)?r:best,null),color=owner=>'rgb('+(FACTION_COLORS[owner]||[.7,.7,.7]).map(v=>Math.round(v*255)).join(',')+')',label='Битва у '+(nearest?.city||'границы'),content=`<div class="battle-meter"><i style="width:${ratio}%;background-color:${color(battle.ownerA)}"></i><i style="width:${100-ratio}%;background-color:${color(battle.ownerB)}"></i></div><div class="battle-summary"><div class="battle-side"><b>⚔ ${Math.ceil(a).toLocaleString(interfaceLocale)}</b><small>Потери ${Math.floor(battle.lossA||0).toLocaleString(interfaceLocale)}</small></div><div class="battle-center"><b>${label}</b><small>${battle.sideA?.length||0} отр. · ${battle.sideB?.length||0} отр.</small></div><div class="battle-side right"><b>${Math.ceil(b).toLocaleString(interfaceLocale)} ⚔</b><small>Потери ${Math.floor(battle.lossB||0).toLocaleString(interfaceLocale)}</small></div></div>`;if(el.dataset.content!==content){el.dataset.content=content;el.innerHTML=content}let point=project(battle.point.x,battle.point.z,roadGround(battle.point.x,battle.point.z)+8);el.style.left=point.x+'px';el.style.top=point.y+'px';el.hidden=point.x<0||point.y<0||point.x>canvas.clientWidth||point.y>canvas.clientHeight}}
+function updateBattlePanel(){const battles=state.battlePairs||[],layer=$('battle-layer'),live=new Set(battles);for(const [battle,el] of battlePanels)if(!live.has(battle)){el.remove();battlePanels.delete(battle)}for(const battle of battles){let el=battlePanels.get(battle);if(!el){el=document.createElement('section');el.className='battle-panel';el.setAttribute('aria-label','Ход сражения');layer.appendChild(el);battlePanels.set(battle,el)}let a=battle.totalA||0,b=battle.totalB||0,total=a+b,ratio=total?Math.max(3,Math.min(97,a/total*100)):50,nearest=state.regions.reduce((best,r)=>!best||distance(r.slots[0],battle.point)<distance(best.slots[0],battle.point)?r:best,null),color=owner=>'rgb('+(FACTION_COLORS[owner]||[.7,.7,.7]).map(v=>Math.round(v*255)).join(',')+')',label=battle.bridgeA||battle.bridgeB?'Бой у моста · '+(battle.bridgeA||battle.bridgeB):'Битва у '+(nearest?.city||'границы'),content=`<div class="battle-meter"><i style="width:${ratio}%;background-color:${color(battle.ownerA)}"></i><i style="width:${100-ratio}%;background-color:${color(battle.ownerB)}"></i></div><div class="battle-summary"><div class="battle-side"><b>⚔ ${Math.ceil(a).toLocaleString(interfaceLocale)}</b><small>Потери ${Math.floor(battle.lossA||0).toLocaleString(interfaceLocale)}</small></div><div class="battle-center"><b>${label}</b><small>${battle.sideA?.length||0} отр. · ${battle.sideB?.length||0} отр.</small></div><div class="battle-side right"><b>${Math.ceil(b).toLocaleString(interfaceLocale)} ⚔</b><small>Потери ${Math.floor(battle.lossB||0).toLocaleString(interfaceLocale)}</small></div></div>`;if(el.dataset.content!==content){el.dataset.content=content;el.innerHTML=content}let point=project(battle.point.x,battle.point.z,roadGround(battle.point.x,battle.point.z)+8);el.style.left=point.x+'px';el.style.top=point.y+'px';el.hidden=point.x<0||point.y<0||point.x>canvas.clientWidth||point.y>canvas.clientHeight}}
 function updateToolAffordability(){
  document.querySelectorAll('.tool').forEach(button=>{
   const type=button.dataset.type,cost=TYPES[type]?.cost||0;
@@ -8022,7 +8436,7 @@ $('occupy-neutral').onclick=()=>{
  updateUI();
 };
 $('petition-send').onclick=()=>{const r=state.selected,q=sendPetition(state,'you',r);if(!q.ok){flash(q.reason);updateUI();return}flash('Обоз отправлен: '+r.city+' · '+Math.ceil(q.ship.duration)+' сек.');updateUI()};
-const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест в сфере услуг и +1 к цели довольства.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает морскую торговлю с портами соперников.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
+const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест в сфере услуг и +1 к цели довольства.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает торговлю с портами соперников. Стройте у моря или судоходной реки.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
 const ICONS={
  city:'<path d="M4 15 16 5l12 10M7 13v14h18V13M13 27v-8h6v8M21 8V5h4v6"/>',
  grain:'<path d="M16 29V8m0 6c-5 0-8-2-8-6 5 0 8 2 8 6zm0 7c-6 0-9-2-9-7 6 0 9 2 9 7zm0-7c5 0 8-2 8-6-5 0-8 2-8 6zm0 7c6 0 9-2 9-7-6 0-9 2-9 7zm0-13c-3-3-2-5 0-6 2 1 3 3 0 6z"/>',
@@ -8185,7 +8599,6 @@ function renderSlotMarkers(){
   element.style.setProperty('--hit-size',Math.max(24,Math.min(44,nearest*.9))+'px');
  }
 }
-canvas.addEventListener('contextmenu',e=>e.preventDefault());
 function issueGroupOrder(location,targetOwner=null){
  const group=selectedGroup.slice();
  requestArmyAction(()=>{
@@ -8228,8 +8641,8 @@ function selectArea(x1,y1,x2,y2){
  return {armies:group.length,cargos:cargos.length};
 }
 function updateSelectionBox(rect,x,y){let box=$('selection-box'),a=drag.x-rect.left,b=drag.y-rect.top;box.style.left=Math.min(a,x)+'px';box.style.top=Math.min(b,y)+'px';box.style.width=Math.abs(x-a)+'px';box.style.height=Math.abs(y-b)+'px';box.hidden=false}
-canvas.addEventListener('pointerdown',e=>{let button=e.button??0;drag={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false,button,select:button===0&&!councilMapOrder&&!mode&&state.started};canvas.setPointerCapture(e.pointerId);if(button!==0)e.preventDefault?.()});
-canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect();if(drag){const speed=preferences.mouseSpeed/100;let dx=(e.clientX-drag.lastX)*speed,dy=(e.clientY-drag.lastY)*speed;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;if(drag.moved){if(drag.select){updateSelectionBox(rect,e.clientX-rect.left,e.clientY-rect.top)}else if(drag.button===2){cam.yaw=(cam.yaw||0)-dx*.006;cam.tilt=Math.max(.4,Math.min(1.8,(cam.tilt??DEFAULT_CAMERA_TILT)+dy*.006));dirtyLabels=true}else if(drag.button===1)moveCameraScreen(dx,dy)}drag.lastX=e.clientX;drag.lastY=e.clientY}
+canvas.addEventListener('pointerdown',e=>{const button=e.button;if(button>2||button===2&&!mode)return;drag={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false,button,select:button===0&&!councilMapOrder&&!mode&&state.started};canvas.setPointerCapture(e.pointerId);if(button!==0)e.preventDefault()});
+canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect();if(drag){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;if(drag.moved){if(drag.select){updateSelectionBox(rect,e.clientX-rect.left,e.clientY-rect.top)}else if(drag.button===1){const speed=preferences.mouseSpeed/100;moveCameraScreen((e.clientX-drag.lastX)*speed,(e.clientY-drag.lastY)*speed)}}drag.lastX=e.clientX;drag.lastY=e.clientY}
  const x=e.clientX-rect.left,y=e.clientY-rect.top;
  if(councilMapOrder)return;
  if(mode){hoverPlacement(x,y);return}
@@ -8252,7 +8665,9 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,but
   else flash('Выберите свободное графство в своём герцогстве');
   return;
  }
- const x=e.clientX-rect.left,y=e.clientY-rect.top,point=unproject(x,y);
+ const x=e.clientX-rect.left,y=e.clientY-rect.top;
+ if(mapView().cartographic&&!diplomaticAtlas.contains(x,y))return;
+ const point=unproject(x,y);
  if(selectedWarship){issueNavalOrder(point);return}
  if(selectedGroup.length||selectedArmy){
   const destination=state.network&&nearestRoadLocation(state.network,point.x,point.z);
@@ -8261,7 +8676,7 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,but
   else issueSingleArmyOrder(destination);
   return;
  }
- if(chooseMapCandidate(x,y))return;
+ if(!mapView().cartographic&&chooseMapCandidate(x,y))return;
  const region=regionAt(state.regions,point.x,point.z);
  let hit=null,best=18;
  for(const area of state.regions){
@@ -8280,8 +8695,23 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,but
   if(duchySeat(region))playSelectionSound('city');
  }
 });
-canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});canvas.addEventListener('wheel',e=>{e.preventDefault();let rect=canvas.getBoundingClientRect(),old=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.scale=Math.max(MIN_MAP_ZOOM,Math.min(MAX_MAP_ZOOM,cam.scale*Math.exp(-e.deltaY*.001*preferences.zoomSpeed/100)));let next=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.x+=old.x-next.x;cam.z+=old.z-next.z;dirtyLabels=true;if(mode&&!councilMapOrder)hoverPlacement(e.clientX-rect.left,e.clientY-rect.top)},{passive:false});
-function focusCapital(){let r=state.regions.find(x=>x.id===state.capitalId);if(r){cam.x=r.slots[0].x;cam.z=r.slots[0].z}cam.yaw=0;cam.tilt=DEFAULT_CAMERA_TILT;dirtyLabels=true}
+canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});
+canvas.addEventListener('wheel',e=>{
+ e.preventDefault();
+ const rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
+ const previous=cam.scale,old=unproject(x,y);
+ cam.scale=Math.max(MIN_MAP_ZOOM,Math.min(MAX_MAP_ZOOM,previous*Math.exp(-e.deltaY*.001*preferences.zoomSpeed/100)));
+ if(cam.scale===MIN_MAP_ZOOM&&previous!==MIN_MAP_ZOOM&&atlasAvailable()){
+  atlasCenterAtMinimum={x:cam.x,z:cam.z,elapsed:0};
+ }else{
+  const next=unproject(x,y);
+  cam.x+=old.x-next.x;cam.z+=old.z-next.z;
+ }
+ mapView();
+ dirtyLabels=true;
+ if(mode&&!councilMapOrder)hoverPlacement(x,y);
+},{passive:false});
+function focusCapital(){atlasCenterAtMinimum=null;let r=state.regions.find(x=>x.id===state.capitalId);if(r){cam.x=r.slots[0].x;cam.z=r.slots[0].z}cam.yaw=0;cam.tilt=DEFAULT_CAMERA_TILT;dirtyLabels=true}
 $('camera-home').onclick=focusCapital;
 window.addEventListener('keydown',e=>{
  if(occupationDialog.open)return;

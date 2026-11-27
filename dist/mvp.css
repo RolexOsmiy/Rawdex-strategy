@@ -10,6 +10,11 @@
  --front-serif:Georgia,"Times New Roman",serif;
 }
 
+body,dialog{-webkit-user-select:none;user-select:none}
+:where(input,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="plaintext-only"]){
+ -webkit-user-select:text;user-select:text;
+}
+
 /* The menu is its own surface so the game can paint behind the loading screen. */
 .front-shell{
  position:fixed;inset:0;z-index:90;isolation:isolate;overflow:auto;overscroll-behavior:contain;
@@ -135,6 +140,36 @@
 .start-settlement .map-crest{outline:1px solid #f4ce8e;outline-offset:2px}
 
 .atlas-vignette{background:radial-gradient(ellipse at 50% 46%,transparent 60%,#09171655 100%)}
+#diplomatic-atlas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+#diplomatic-atlas[hidden]{display:none}
+#app.atlas-on-table :is(#labels,#army-layer,#battle-layer,#effects-layer,#order-ping){clip-path:var(--atlas-clip)}
+#app :is(#labels,#army-layer){opacity:var(--atlas-label-opacity,1)}
+#app :is(#cargo-layer,#fleet-layer,#slot-markers,.atlas-vignette){opacity:var(--atlas-detail-opacity,1)}
+#app.diplomatic-map :is(#cargo-layer,#fleet-layer,#slot-markers){visibility:hidden}
+#app .diplomatic-city{display:flex;align-items:center;gap:5px;transform:translate(-4px,-50%);
+ color:#f4e6c8;font:700 clamp(12px,.86vw,16px)/1.1 Georgia,serif;white-space:nowrap;
+ text-shadow:0 1px 2px #34291c,1px 0 #34291c,-1px 0 #34291c,0 0 4px #34291c}
+.diplomatic-city::before{content:"";width:6px;height:6px;flex:none;border-radius:50%;background:#f2e4c1;border:1px solid #4f3923;box-shadow:0 0 3px #34291c}
+#app .diplomatic-city.diplomatic-capital{color:#ffe3a1}
+.diplomatic-city.diplomatic-capital::before{width:8px;height:8px;background:#e6bf68}
+#app .diplomatic-city.diplomatic-selected{color:#f7d476}
+.diplomatic-city.diplomatic-selected::before{box-shadow:0 0 0 2px #f7d476,0 0 0 3px #574029}
+#app .diplomatic-realm{font-family:Georgia,serif;font-style:italic;font-weight:600;letter-spacing:.18em;
+ color:#f1d9a5;line-height:1;text-shadow:0 1px 2px #49361f,0 0 11px #492f1d,0 0 20px #492f1d}
+#app.diplomatic-map .sea-label{color:#aabdc0;font:italic 500 clamp(13px,1.5vw,24px)/1 Georgia,serif;letter-spacing:.3em;
+ text-shadow:0 1px 3px #243a45}
+#app.diplomatic-map .march-badge{transform:translate(-50%,-50%)}
+#app.diplomatic-map .march-badge.atlas-callout{clip-path:none;overflow:visible}
+.atlas-army-crest{display:none}
+#app.diplomatic-map .atlas-army-crest{display:grid;place-items:center}
+#app.diplomatic-map .general-army-badge b{font-size:14px}
+#app.diplomatic-map .general-army-swords{width:17px;height:17px}
+#app.diplomatic-map .march-badge.atlas-callout::after{content:"";position:absolute;pointer-events:none;
+ left:50%;top:50%;width:var(--atlas-stem);height:1px;background:#dac492;transform-origin:left;
+ transform:rotate(var(--atlas-stem-angle));box-shadow:0 0 2px #2c2115;z-index:-1}
+#app.diplomatic-map .march-badge.atlas-callout::before{content:"";position:absolute;pointer-events:none;
+ left:calc(50% + var(--atlas-dot-x));top:calc(50% + var(--atlas-dot-y));width:4px;height:4px;
+ background:#ead4a0;border:1px solid #534027;border-radius:50%;transform:translate(-50%,-50%)}
 #app :is(.duchy-card,.building-detail,.muster-panel,.cargo-inspector,.realm-overview,.notifications-panel,#council-panel,.campaign-panel,.border-dialog,.defeat,.campaign-finale,.object-chooser,.council-month-report,.council-map-picker,.settings-panel,.army-selection,.battle-panel,.recap-legend){
  background:var(--panel);border-color:var(--edge);box-shadow:var(--shadow);scrollbar-width:thin;scrollbar-color:#927853 #172b2a;
 }
