@@ -253,6 +253,9 @@
 #app .tool:is(.active,:hover,:focus-visible){background:var(--pressed);border-color:var(--brass)}
 #app .tool .icon{grid-area:icon;display:grid;place-items:center;min-width:0}
 #app .tool .icon svg{width:32px;height:32px;filter:drop-shadow(0 1px 1px #000a)}
+#app .construction-glyph{
+ color:#e6c58d;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;
+}
 #app .tool .name{
  grid-area:name;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;
  font:650 11px/1.2 var(--copy);
@@ -379,6 +382,16 @@
  font:700 15px/1.15 var(--display);letter-spacing:0;color:var(--ivory);
 }
 #app :is(.campaign-finale-card,.border-dialog,.settings-panel,.building-detail,.muster-panel){border-radius:7px}
+#occupation-choice{box-sizing:border-box;width:min(420px,calc(100vw - 24px));max-height:calc(100dvh - 24px);padding:18px}
+#occupation-choice::backdrop{background:#050908a8}
+.occupation-heading,.occupation-assign{display:flex;align-items:center;gap:10px}
+.occupation-heading{justify-content:space-between}
+#occupation-later{color:var(--ivory);background:none;border:1px solid #a7956c66;border-radius:4px;padding:5px 8px;white-space:nowrap}
+.occupation-options{display:grid;gap:7px}
+.occupation-options small{margin:0 0 5px;font-size:11px}
+.occupation-options label{font-size:12px;color:var(--ivory)}
+.occupation-assign select{flex:1;min-width:0;color:var(--ivory);background:#172622;border:1px solid #a7956c66;border-radius:4px;padding:6px}
+#occupation-error{color:#ffc18a;margin-bottom:0}
 #app .council-map-picker{top:62px}
 #app :is(.object-chooser,.cargo-inspector,.army-selection){border-radius:7px}
 #app .traffic-legend{left:auto;bottom:8px;right:145px}

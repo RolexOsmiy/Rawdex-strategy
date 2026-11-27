@@ -4,6 +4,8 @@ const interfaceLocale=globalThis.gameI18n?.locale||'ru-RU';
 const $=id=>document.getElementById(id),canvas=$('world'),gl=globalThis.mapGPU;
 const PARCEL_STYLE_ROWS=GAME_MAP?256:64;
 const WORLD_SCALE=WORLD_WIDTH/1100;
+const MIN_MAP_ZOOM=.0023/WORLD_SCALE,MAX_MAP_ZOOM=.08;
+const WAGON_DETAIL_ZOOM=Math.sqrt(MIN_MAP_ZOOM*MAX_MAP_ZOOM);
 const SHIP_CLEARANCE=3.1;
 const prog=gl.createMapProgram('world');gl.useProgram(prog);
 const loc={p:gl.getAttribLocation(prog,'aPos'),c:gl.getAttribLocation(prog,'aColor'),edge:gl.getAttribLocation(prog,'aEdge'),center:gl.getUniformLocation(prog,'uCenter'),size:gl.getUniformLocation(prog,'uViewport'),scale:gl.getUniformLocation(prog,'uScale'),orientation:gl.getUniformLocation(prog,'uOrientation'),tilt:gl.getUniformLocation(prog,'uTilt'),tint:gl.getUniformLocation(prog,'uTint'),tintAmount:gl.getUniformLocation(prog,'uTintAmount'),captureOrigin:gl.getUniformLocation(prog,'uCaptureOrigin'),captureRadius:gl.getUniformLocation(prog,'uCaptureRadius'),captureStrength:gl.getUniformLocation(prog,'uCaptureStrength'),captureOld:gl.getUniformLocation(prog,'uCaptureOld'),captureOldMix:gl.getUniformLocation(prog,'uCaptureOldMix'),terrainDetail:gl.getUniformLocation(prog,'uTerrainDetail'),parcel:gl.getUniformLocation(prog,'uParcel'),paintPlots:gl.getUniformLocation(prog,'uPaintPlots'),parcelIndexReady:gl.getUniformLocation(prog,'uParcelIndexReady'),parcelIndexSize:gl.getUniformLocation(prog,'uParcelIndexSize'),parcelIndex:gl.getUniformLocation(prog,'uParcelIndex'),parcelStyle:gl.getUniformLocation(prog,'uParcelStyle'),showPlotBorders:gl.getUniformLocation(prog,'uShowPlotBorders'),andalusiaReady:gl.getUniformLocation(prog,'uAndalusiaReady'),hoverPlot:gl.getUniformLocation(prog,'uHoverPlot'),hoverValid:gl.getUniformLocation(prog,'uHoverValid'),water:gl.getUniformLocation(prog,'uWater'),roadDetail:gl.getUniformLocation(prog,'uRoadDetail'),roadMap:gl.getUniformLocation(prog,'uRoadMap'),time:gl.getUniformLocation(prog,'uTime'),ground:gl.getUniformLocation(prog,'uGround'),waterMap:gl.getUniformLocation(prog,'uWaterMap'),textureReady:gl.getUniformLocation(prog,'uTextureReady'),waterReady:gl.getUniformLocation(prog,'uWaterReady'),
@@ -2302,7 +2304,7 @@ function rebuildCountryTint(owner,changed=null){
  }
 }
 function drawBorderBuffer(buffer,width,color){if(!buffer?.count)return;gl.bindBuffer(gl.ARRAY_BUFFER,buffer.buffer);gl.vertexAttribPointer(borderLoc.position,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(borderLoc.direction,3,gl.FLOAT,false,28,12);gl.vertexAttribPointer(borderLoc.side,1,gl.FLOAT,false,28,24);gl.uniform1f(borderLoc.width,width*canvas.width/canvas.clientWidth);gl.uniform3f(borderLoc.color,...color);gl.drawArrays(gl.TRIANGLES,0,buffer.count)}
-let musterHoverId=null,musterFocusId=null,musterOutline=null;
+let musterHoverId=null,musterFocusId=null,musterOutline=null,selectedOutline=null;
 const steadyWarOutline=!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribArray(borderLoc.position);gl.enableVertexAttribArray(borderLoc.direction);gl.enableVertexAttribArray(borderLoc.side);gl.uniform2f(borderLoc.center,cam.x,cam.z);gl.uniform2f(borderLoc.viewport,canvas.width,canvas.height);gl.uniform1f(borderLoc.scale,cam.scale);cameraUniforms(borderLoc);
  // Terrain and roads have already rendered. Keep the surface geometry, but
@@ -2312,7 +2314,6 @@ function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribAr
  for(const r of state.regions)if(r.owner==='neutral'){let b=borderBuffers.get(r.id);drawBorderBuffer(b,1.6,[.15,.22,.20]);drawBorderBuffer(b,.50,[.68,.68,.55])}
  const ownerColors=FACTION_COLORS;
  for(const r of state.regions){if(!ownerColors[r.owner])continue;let b=borderBuffers.get(r.id);drawBorderBuffer(b,3.2,[.072,.13,.14]);drawBorderBuffer(b,1.91,ownerColors[r.owner]);drawBorderBuffer(b,.48,mixColor(ownerColors[r.owner],[.87,.81,.64],.57))}
- if(state.selected&&state.selected.owner==='neutral'){let b=borderBuffers.get(state.selected.id);drawBorderBuffer(b,3.9,[.078,.14,.15]);drawBorderBuffer(b,2.26,[.80,.63,.35]);drawBorderBuffer(b,.91,[.96,.86,.65])}
  const pulse=steadyWarOutline?.85:(1+Math.cos(now/245))/2;
  for(const region of state.regions){
   if(!isAtWar(state,'you',region.owner))continue;
@@ -2330,6 +2331,16 @@ function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribAr
   drawBorderBuffer(musterOutline.border,6,[.34,.24,.08]);
   drawBorderBuffer(musterOutline.border,3.3,[1,.78,.28]);
   drawBorderBuffer(musterOutline.border,1,[1,.96,.71]);
+ }
+ const selected=state.selected??null;
+ if(selected!==(selectedOutline?.region??null)){
+  if(selectedOutline)gl.deleteBuffer(selectedOutline.border.buffer);
+  selectedOutline=selected?{region:selected,border:makeBorderBuffer(borderVertices(selected,false))}:null;
+ }
+ if(selectedOutline){
+  drawBorderBuffer(selectedOutline.border,6,[.15,.12,.08]);
+  drawBorderBuffer(selectedOutline.border,3.2,[.91,.68,.25]);
+  drawBorderBuffer(selectedOutline.border,1.1,[1,.94,.68]);
  }
  drawSelectedArmyRoutes();
  gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.useProgram(prog);for(const i of [borderLoc.position,borderLoc.direction,borderLoc.side])if(i!==loc.p&&i!==loc.c)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(loc.p);gl.enableVertexAttribArray(loc.c);
@@ -2471,6 +2482,8 @@ function heraldryShield(key,size=42){
 }
 let mapStatsSignature='';
 const CITY_ALERTS=[
+ {id:'administration',label:'Выбрать управление',icon:()=>'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4v6c0 4-4 7-8 9-4-2-8-5-8-9V7ZM12 8v5m0 3v1"/></svg>',
+  when:({region})=>region.awaitingAdministration},
  {id:'food',label:'Не хватает зерна',icon:()=>resourceGlyph('grain'),
   when:({hungry,stock,need,harvest})=>hungry||need>0&&stock<need*.65&&harvest<need-.01},
  {id:'housing',label:'Не хватает жилья',icon:()=>'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 11 9-8 9 8M6 10v10h12V10m-8 10v-5h4v5"/></svg>',
@@ -3222,6 +3235,17 @@ for(const z of [-.072,.072]){
  timberBeam(wagonHorse,[2.13,1.33,z],[2.15,1.51,z],.042,chestnut);
  timberBeam(wagonHorse,[2.18,1.23,z],[1.78,.88,Math.sign(z)*.20],.022,horseLeather);
 }
+function addWagonHorse(parts,phase,stopped,offset=0){
+ if(offset)appendPaintedModel(parts,wagonHorse,offset,0,0,0);
+ else parts.push(...wagonHorse);
+ for(let leg=0;leg<4;leg++){
+  const x=offset+(leg%2?1.87:1.20),z=leg<2?-.16:.16;
+  const stride=stopped?0:Math.sin(phase+(leg===0||leg===3?0:Math.PI))*.125;
+  timberBeam(parts,[x,.68,z],[x+stride,.37,z],.092,chestnut);
+  timberBeam(parts,[x+stride,.37,z],[x+stride*1.32,.083,z],.070,horseLeather);
+  cube(parts,x+stride*1.32,.038,z,.095,.076,.084,horseLeather);
+ }
+}
 function drawCarts(){
  if(!state.economy||(!state.economy.shipments.length&&!state._harborUnloading?.size))return;
  const v=[],visible=[];
@@ -3243,14 +3267,15 @@ function drawCarts(){
  const angle=routeHeading(ship.path,progress);
  const color={grain:[.8,.69,.38],wood:[.48,.34,.23],iron:[.55,.56,.56],cloth:[.68,.44,.47],equipment:[.72,.52,.27]}[ship.good],parts=[];
  const factionColor=FACTION_COLORS[shipmentOwner(ship)]||FACTION_COLORS.you;
- const close=ship===selectedCargo||ship.kind==='petition'||cam.scale>=.006&&(strategic||localDetail-- > 0);
+ const close=cam.scale>=WAGON_DETAIL_ZOOM;
  const tiers=cargoTiers(ship.amount||0);
  const atSea=ship.mode==='sea'&&along>=ship.seaStart&&along<=ship.seaEnd;
  if(atSea){
   if(navigableWater(p)){
    const heading=merchantDockHeading(ship,along,angle);
    if(!ship.supplyBlocked&&along-ship.seaStart>3)shipWake(v,p.x,p.z,heading,false,phase);
-   placeShip(v,shipModel(factionColor,false,close),p.x,-1.15,p.z,heading);
+   const detailedShip=ship===selectedCargo||ship.kind==='petition'||cam.scale>=.006&&(strategic||localDetail-- > 0);
+   placeShip(v,shipModel(factionColor,false,detailedShip),p.x,-1.15,p.z,heading);
   }
   continue;
  }
@@ -3282,17 +3307,10 @@ function drawCarts(){
    else cube(parts,-.31+(tier%2)*.52,height,0,.54,.27,.67,color);
   }
   for(const x of [-.58,.57])for(const z of [-.61,.61])wheel(parts,x,.4,z,.36,phase);
-  parts.push(...wagonHorse);
-  for(let leg=0;leg<4;leg++){
-   const x=leg%2?1.87:1.20,z=leg<2?-.16:.16;
-   const stride=ship.supplyBlocked?0:Math.sin(phase+(leg===0||leg===3?0:Math.PI))*.125;
-   timberBeam(parts,[x,.68,z],[x+stride,.37,z],.092,chestnut);
-   timberBeam(parts,[x+stride,.37,z],[x+stride*1.32,.083,z],.070,horseLeather);
-   cube(parts,x+stride*1.32,.038,z,.095,.076,.084,horseLeather);
-  }
- if(ship.kind==='export'||ship.kind==='tradeReturn'){cube(parts,-2.4,.42,0,1.6,.4,1,[.38,.28,.18]);cube(parts,-2.4,.85,0,1.2,.65,.8,[.70,.58,.40]);wheel(parts,-2.8,.35,-.54,.3,phase);wheel(parts,-2,.35,-.54,.3,phase);wheel(parts,-2.8,.35,.54,.3,phase);wheel(parts,-2,.35,.54,.3,phase);cube(parts,-.3,1.6,-.35,.08,2.2,.08,[.33,.24,.14]);cube(parts,-.3,2.35,-.06,.07,.6,.58,factionColor)}
+  addWagonHorse(parts,phase,ship.supplyBlocked);
+ if(ship.kind==='export'||ship.kind==='tradeReturn'){const x=-3.9;cube(parts,x,.42,0,1.6,.4,1,[.38,.28,.18]);cube(parts,x,.85,0,1.2,.65,.8,[.70,.58,.40]);for(const dx of [-.4,.4])for(const z of [-.54,.54])wheel(parts,x+dx,.35,z,.3,phase);addWagonHorse(parts,phase,ship.supplyBlocked,x);cube(parts,-.3,1.6,-.35,.08,2.2,.08,[.33,.24,.14]);cube(parts,-.3,2.35,-.06,.07,.6,.58,factionColor)}
  if(ship.kind==='petition'){// A diplomatic column: baggage, standard and armed escort, with no combat effect.
- for(let wagon=1;wagon<=2;wagon++){let x=-wagon*2.4;cube(parts,x,.42,0,1.5,.35,.9,[.38,.28,.18]);cube(parts,x,.85,0,1.1,.65,.75,wagon===1?[.71,.57,.31]:[.59,.55,.44]);wheel(parts,x-.42,.35,-.48,.28,phase);wheel(parts,x+.42,.35,-.48,.28,phase);wheel(parts,x-.42,.35,.48,.28,phase);wheel(parts,x+.42,.35,.48,.28,phase)}
+ for(let wagon=1;wagon<=2;wagon++){let x=-wagon*3.9;cube(parts,x,.42,0,1.5,.35,.9,[.38,.28,.18]);cube(parts,x,.85,0,1.1,.65,.75,wagon===1?[.71,.57,.31]:[.59,.55,.44]);for(const dx of [-.42,.42])for(const z of [-.48,.48])wheel(parts,x+dx,.35,z,.28,phase);addWagonHorse(parts,phase,ship.supplyBlocked,x)}
  cube(parts,-.15,1.3,-.36,.09,2.0,.09,[.33,.24,.14]);cube(parts,-.15,2.05,-.1,.07,.7,.55,factionColor);cube(parts,-.17,2.13,-.1,.12,.18,.18,[.96,.81,.43]);
  for(let i=0;i<4;i++){let x=-1.2-(i>>1)*2.7,z=(i%2?1:-1)*1.15,bob=Math.sin(phase+i)*.07;cube(parts,x,.52+bob,z,.32,.74,.27,factionColor);cube(parts,x,1.02+bob,z,.27,.27,.27,[.79,.68,.50]);cube(parts,x+.18,.75+bob,z,.08,1.55,.08,[.40,.33,.22]);cube(parts,x,1.18+bob,z,.35,.1,.33,[.55,.56,.50])}}
  }appendPaintedModel(v,parts,p.x,y,p.z,angle);
@@ -3682,7 +3700,7 @@ function renderMarches(){
   const label=unit.inBattle?'Идёт бой':unit.gateId?'Осада ворот':unit.waiting?'Ожидает':
    'В пути · '+Math.ceil(unit.duration-elapsed)+' сек.';
   items.push({key:unit,owner:unit.owner,house:vassalById(state,unit.vassalId,unit.owner),troops:unit.troops,point:pointOnRoute(unit.path,progress),
-   selection:{kind:'unit',unit},label,icon:unit.gateId?'♜':'⚑'});
+   selection:{kind:'unit',unit},moving:true,label,icon:unit.gateId?'♜':'⚑'});
  }
  const byKey=new Map(items.map(item=>[item.key,item])),stacks=new Map();
  for(const item of items){
@@ -3705,7 +3723,7 @@ function renderMarches(){
   const {point,key,count,general,stack,stackIndex}=item;
   const screen=project(point.x,point.z,roadGround(point.x,point.z)+6);
   item.position={...screen};
-  const nearSeat=state.regions.find(r=>r.slots?.[0]&&Math.hypot(r.slots[0].x-point.x,r.slots[0].z-point.z)<=18);
+  const nearSeat=!item.moving&&state.regions.find(r=>r.slots?.[0]&&Math.hypot(r.slots[0].x-point.x,r.slots[0].z-point.z)<=18);
   if(nearSeat){
    const seat=nearSeat.slots[0],label=project(seat.x,seat.z,roadGround(seat.x,seat.z));
    if(Math.hypot(screen.x-label.x,screen.y-label.y)<34){screen.x=label.x;screen.y=label.y+24}
@@ -3793,6 +3811,7 @@ const slotMarkerNodes=new Map();
 let slotMarkerRevision=0,slotMarkerContent='',slotMarkerView='';
 function inspectMapBuilding(region,building){
  setSelected(region);
+ if(region.awaitingAdministration)return;
  playSelectionSound(building.type);
  if(building===duchySeat(region)){closeBuilding();selectDuchyTab('overview');return}
  buildingDetails(region,building);
@@ -3881,7 +3900,7 @@ function cargoDescription(ship){let realm=shipmentOwner(ship),capital=state.regi
   label='Поселенцы возвращаются';
   origin=state.regions.find(r=>r.id===ship.targetId)?.city||'поворот на маршруте';
   destination=state.regions.find(r=>r.id===(ship.returnCapitalId??ship.originRegionId))?.city||home;
- }else if(ship.kind==='petition'){label=ship.mode==='sea'?'Морское посольство':'Обоз поселенцев';origin=state.regions.find(r=>r.id===ship.originRegionId)?.city||(ship.owner==='you'?home:regionCity(owner));destination=state.regions.find(r=>r.id===ship.targetId)?.city||'герцогство'}else if(ship.kind==='tradeReturn'){label='Торговец возвращается';origin='рынок';destination=tradeHome}else if(ship.kind==='returnTrade'){label='Возврат груза';origin='прерванный маршрут';destination=tradeHome}else if(ship.kind==='loot'){label='Захваченная добыча';origin='место перехвата';destination=ship.owner==='you'?home:regionCity(owner)}else if(ship.kind==='botSeaTrade'){label=ship.mode==='sea'?'Морской купец':'Купеческий караван';origin=regionCity(owner);destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':ship.buyer==='you'?home:regionCity(buyer)}else if(ship.kind==='export'){label=ship.mode==='sea'?'Морской торговый караван':'Торговый караван · Продажа';origin=tradeHome;destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':state.regions.find(r=>r.id===(ship.destinationRegionId??realmCapitalId(state,ship.buyer)))?.city||regionCity(buyer)}else if(ship.kind==='import'){label='Покупка';origin=state.regions.find(r=>r.id===ship.sourceTradeRegionId)?.city||regionCity(seller);destination=home}else if(ship.kind==='botSupply'){label=ship.seaSupply?'Морское снабжение соперника':'Сборный обоз соперника';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=regionCity(owner)}else{const market=tradeCenter(state,ship.supplyMarketId);label=market?'Поставка на торговый склад':ship.marketTransfer!=null?'Запасы в столицу':ship.seaSupply?'Морское снабжение':'Сборная поставка в столицу';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=market?.city||home}let left=Math.max(0,Math.ceil(ship.duration-ship.elapsed-simClock));let factionId=shipmentOwner(ship),whose=factionId==='you'?(ship.seaSupply?'Ваш груз':'Ваш обоз'):'Обоз: '+regionCity(state.factions?.[factionId]);return whose+' · '+label+' · '+(ship.kind==='tradeReturn'?'без груза':(ship.cargo?Object.entries(ship.cargo).map(([g,n])=>GOODS_LABELS[g]+' '+n).join(', '):GOODS_LABELS[ship.good]+' '+ship.amount)+' ед.')+' · '+origin+' → '+destination+(ship.kind==='export'?' · путь '+Math.round(ship.tradeDistance||routeLength(ship.path))+(ship.mode==='sea'?' ед.':' / '+Math.round(ship.tradeRange||tradeRange(state))+' ед.')+' · выручка '+ship.value.toFixed(1)+' зл. после доставки · пошлина страны покупателя '+(ship.value*.15).toFixed(1)+' зл.':'')+(ship.seaSupply?' · через '+state.regions.find(r=>r.id===ship.seaSupply.departureId)?.city+' и '+state.regions.find(r=>r.id===ship.seaSupply.arrivalId)?.city:'')+(ship.kind==='petitionReturn'?' · возвращает '+ship.fee+' зл.':'')+(ship.supplyBlocked?' · пункт назначения недоступен':(ship.routeRisk?' · риск перехвата':ship.warDetour?' · маршрут в обход':'')+' · '+left+' сек.')}
+ }else if(ship.kind==='petition'){label=ship.mode==='sea'?'Морское посольство':'Обоз поселенцев';origin=state.regions.find(r=>r.id===ship.originRegionId)?.city||(ship.owner==='you'?home:regionCity(owner));destination=state.regions.find(r=>r.id===ship.targetId)?.city||'герцогство'}else if(ship.kind==='tradeReturn'){label='Торговец возвращается';origin='рынок';destination=tradeHome}else if(ship.kind==='returnTrade'){label='Возврат груза';origin='прерванный маршрут';destination=tradeHome}else if(ship.kind==='loot'){label='Захваченная добыча';origin='место перехвата';destination=ship.owner==='you'?home:regionCity(owner)}else if(ship.kind==='botSeaTrade'){label=ship.mode==='sea'?'Морской купец':'Купеческий караван';origin=regionCity(owner);destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':ship.buyer==='you'?home:regionCity(buyer)}else if(ship.kind==='export'){label=ship.mode==='sea'?'Морской торговый караван':'Торговый караван · Продажа';origin=tradeHome;destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':state.regions.find(r=>r.id===(ship.destinationRegionId??realmCapitalId(state,ship.buyer)))?.city||regionCity(buyer)}else if(ship.kind==='import'){label=ship.domesticPurchase?'Закупка феодала · '+ship.value+' зл.':'Покупка';origin=state.regions.find(r=>r.id===ship.sourceTradeRegionId)?.city||regionCity(seller);destination=state.regions.find(r=>r.id===ship.departureRegionId)?.city||home}else if(ship.kind==='botSupply'){label=ship.seaSupply?'Морское снабжение соперника':'Сборный обоз соперника';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=regionCity(owner)}else{const market=tradeCenter(state,ship.supplyMarketId);label=market?'Поставка на торговый склад':ship.marketTransfer!=null?'Запасы в столицу':ship.seaSupply?'Морское снабжение':'Сборная поставка в столицу';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=market?.city||home}let left=Math.max(0,Math.ceil(ship.duration-ship.elapsed-simClock));let factionId=shipmentOwner(ship),whose=factionId==='you'?(ship.seaSupply?'Ваш груз':'Ваш обоз'):'Обоз: '+regionCity(state.factions?.[factionId]);return whose+' · '+label+' · '+(ship.kind==='tradeReturn'?'без груза':(ship.cargo?Object.entries(ship.cargo).map(([g,n])=>GOODS_LABELS[g]+' '+n).join(', '):GOODS_LABELS[ship.good]+' '+ship.amount)+' ед.')+' · '+origin+' → '+destination+(ship.kind==='export'?' · путь '+Math.round(ship.tradeDistance||routeLength(ship.path))+(ship.mode==='sea'?' ед.':' / '+Math.round(ship.tradeRange||tradeRange(state))+' ед.')+' · выручка '+ship.value.toFixed(1)+' зл. после доставки · пошлина страны покупателя '+(ship.value*.15).toFixed(1)+' зл.':'')+(ship.seaSupply?' · через '+state.regions.find(r=>r.id===ship.seaSupply.departureId)?.city+' и '+state.regions.find(r=>r.id===ship.seaSupply.arrivalId)?.city:'')+(ship.kind==='petitionReturn'?' · возвращает '+ship.fee+' зл.':'')+(ship.supplyBlocked?' · пункт назначения недоступен':(ship.routeRisk?' · риск перехвата':ship.warDetour?' · маршрут в обход':'')+' · '+left+' сек.')}
 function visibleCargoBadges(){
  const visible=[];
  const limit=cam.scale<.005?26:48;
@@ -3945,13 +3964,13 @@ function showGain(point,label,kind='resource'){
  el.className='gain-effect gain-'+kind;el.textContent=label;
  addMapFeedback(point,el,1450);
 }
-function showConstructionFeedback(point,label){
+function showConstructionFeedback(point,label,owner){
  const details=document.createElement('div');
  details.className='construction-bloom';
  for(let i=0;i<5;i++)details.appendChild(document.createElement('i'));
  addMapFeedback(point,details,1050,1);
  showGain(point,label,'construction');
- if(inMapViewport(point.x,point.z,6))playFeedbackSound('build');
+ if(owner==='you'&&inMapViewport(point.x,point.z,6))playFeedbackSound('build');
 }
 function showCounterGain(id,amount,suffix=''){
  if(!amount)return;
@@ -4281,6 +4300,7 @@ function setSelected(region,tab){
   $('duchy-pages').scrollTop=0;
  }
  dirtyLabels=true;updateUI();
+ if(region?.awaitingAdministration)openOccupationChoice(region);
 }
 function campaignCrossing(owner,from,region,destination,onlySource=null){
  if(!GAME_MAP||!region?.coast||!destination||!from) return null;
@@ -5011,7 +5031,7 @@ function onDuchyCaptured(event){
  refreshSupplyShipments(affected);
  dirtyLabels=true;
  if(attacker==='you'){
-  addNotice('land','Герцогство захвачено',region.name+' · накормите жителей и восстановите столицу',region.id);
+  addNotice('land','Герцогство захвачено',region.name+' · выберите, кто будет управлять герцогством',region.id);
   flash('Герцогство захвачено: '+region.name);
   showGain(region.slots[0],'+ ГЕРЦОГСТВО','upgrade');
  }else if(defender==='you'){
@@ -5039,7 +5059,7 @@ function onTradeDispatched(ship){
 function onMarketsReady(regions){
  refreshCapitalRoutes(false,new Set(regions.map(region=>region.owner)));
  for(const region of regions){
-  showConstructionFeedback(region.slots[0],'Открыт торговый центр');
+  showConstructionFeedback(region.slots[0],'Открыт торговый центр',region.owner);
   if(region.owner==='you'&&!region.market.commissionedByCouncil)addNotice('economy','Торговый центр открыт',region.city,region.id);
  }
  dirtyLabels=true;
@@ -5047,7 +5067,7 @@ function onMarketsReady(regions){
 function onArmoriesReady(regions){
  buildingsBuffer=geometryForBuildings();dirtyLabels=true;
  for(const region of regions){
-  showConstructionFeedback(region.slots[0],'Открыта оружейная мастерская');
+  showConstructionFeedback(region.slots[0],'Открыта оружейная мастерская',region.owner);
   if(region.owner==='you'&&!region.armory.commissionedByCouncil)addNotice('economy','Оружейная мастерская открыта',region.city,region.id);
  }
 }
@@ -5332,7 +5352,7 @@ function planBotCouncil(owner){
  faction.exportPolicy={wood:'trade',iron:enemies.size&&faction.stocks.iron<24?'hold':'trade',cloth:enemies.size&&faction.stocks.cloth<16?'hold':'trade'};
  const seat=duchySeat(capital);
  if((seat.level||1)<2&&faction.gold>=190&&(enemies.size||regionalPopulation(capital)>cityHousing(seat)*.78)){
-  if(upgradeBuilding(state,capital,seat,null,owner).ok)onCouncilUpgrade(seat);
+  if(upgradeBuilding(state,capital,seat,null,owner).ok)onCouncilUpgrade(seat,owner);
  }
  if(enemies.size&&faction.gold>=ARMORY_COST.gold+75){
   const workshop=owned.find(r=>!vassalFor(state,r)&&armoryCheck(state,r,null,owner).ok);
@@ -5490,11 +5510,11 @@ function developBot(id){let f=state.factions?.[id];if(!f||f.defeated||f.isRebel)
   }
  }
  let promotion=realmPromotionCheck(state,id),nextRank=promotion.next,capital=state.regions.find(r=>r.id===f.regionId&&r.owner===id),capitalCity=capital?.buildings.find(b=>b.type==='city'&&b.capital),industry=owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product&&b.route?.length).length,0);
- if(nextRank&&!isAtWar(state,'you',id)&&promotion.lands>=nextRank.requiredLands&&capitalCity&&industry>=2){let level=capitalCity.level||1,cityCost=level===1?120:200;if(level<nextRank.capitalLevel&&f.gold>=cityCost+reserve){const result=upgradeBuilding(state,capital,capitalCity,null,id);if(result.ok){onCouncilUpgrade(capitalCity);if(state.selected===capital)updateUI();return}}if(promotion.ok&&f.gold>=nextRank.cost+reserve){promoteRealm(state,id);if(state.selected===capital)updateUI();return}if(level>=nextRank.capitalLevel&&f.gold>=nextRank.cost*.6&&f.gold<nextRank.cost+reserve)return}
+ if(nextRank&&!isAtWar(state,'you',id)&&promotion.lands>=nextRank.requiredLands&&capitalCity&&industry>=2){let level=capitalCity.level||1,cityCost=level===1?120:200;if(level<nextRank.capitalLevel&&f.gold>=cityCost+reserve){const result=upgradeBuilding(state,capital,capitalCity,null,id);if(result.ok){onCouncilUpgrade(capitalCity,id);if(state.selected===capital)updateUI();return}}if(promotion.ok&&f.gold>=nextRank.cost+reserve){promoteRealm(state,id);if(state.selected===capital)updateUI();return}if(level>=nextRank.capitalLevel&&f.gold>=nextRank.cost*.6&&f.gold<nextRank.cost+reserve)return}
  // Save briefly for a viable trade connection; never reserve resources in wartime.
  if(opportunity&&f.gold>=65&&f.gold<portBudget)return;
  if(f.gold<reserve||(armyTroops(state,id)<100&&f.gold<150))return;
- let pending=state.economy.shipments.some(s=>s.kind==='petition'&&s.owner===id),canExpand=armyTroops(state,id)>=100&&!isAtWar(state,'you',id)&&!owned.some(r=>r.buildings.length<2)&&!pending&&state.regions.some(r=>r.owner==='neutral'&&adjacentToFaction(state,r,id)&&(f.stocks[petitionFor(r).good]||0)>=petitionFor(r).amount);if(canExpand&&f.gold<170)return;let workshops=owned.flatMap(r=>r.buildings.filter(b=>b.product&&b.route?.length&&((b.level||1)<3)).map(b=>({r,b}))).sort((a,b)=>b.b.product.rate-a.b.product.rate),built=owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0);if(f.gold>=180&&built>=3&&workshops.length){let {r,b}=workshops[0],level=b.level||1,cost=level===1?80:130;if(f.gold-cost>=50){const result=upgradeBuilding(state,r,b,null,id);if(result.ok){onCouncilUpgrade(b);if(state.selected===r)updateUI();return}}}let regions=owned.filter(r=>r.buildings.length<r.slots.length).sort((a,b)=>a.buildings.length-b.buildings.length);for(const r of regions){let types=GOODS.slice().sort((a,b)=>f.stocks[a]-f.stocks[b]);let hasFarm=state.regions.some(x=>x.owner===id&&x.buildings.some(b=>b.type==='grain'&&b.product));if(f.stocks.grain<12&&!hasFarm)types=['grain',...types.filter(g=>g!=='grain')];else{let owned=state.regions.filter(x=>x.owner===id),military=['iron','cloth'].filter(g=>!owned.some(x=>x.buildings.some(b=>b.type===g&&b.product)));if(military.length)types=[...military,...types.filter(g=>!military.includes(g))]}for(const good of types){let slots=r.slots.filter(p=>!r.buildings.some(b=>b.slotId===p.id)).sort((a,b)=>productivity(good,b.terrain).rate-productivity(good,a.terrain).rate);for(const q of slots){let b={type:good,x:q.x,z:q.z,slotId:q.id,scale:q.scale,terrain:q.terrain,product:productivity(good,q.terrain),produced:0,dispatchClock:0};b.route=attachSupplyRoute(r,b,id);if(!b.route)continue;const result=build(state,good,q.x,q.z,null,id);if(result.ok){finishConstruction(result);if(state.selected===r)updateUI();return}}}}}
+ let pending=state.economy.shipments.some(s=>s.kind==='petition'&&s.owner===id),canExpand=armyTroops(state,id)>=100&&!isAtWar(state,'you',id)&&!owned.some(r=>r.buildings.length<2)&&!pending&&state.regions.some(r=>r.owner==='neutral'&&adjacentToFaction(state,r,id)&&(f.stocks[petitionFor(r).good]||0)>=petitionFor(r).amount);if(canExpand&&f.gold<170)return;let workshops=owned.flatMap(r=>r.buildings.filter(b=>b.product&&b.route?.length&&((b.level||1)<3)).map(b=>({r,b}))).sort((a,b)=>b.b.product.rate-a.b.product.rate),built=owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0);if(f.gold>=180&&built>=3&&workshops.length){let {r,b}=workshops[0],level=b.level||1,cost=level===1?80:130;if(f.gold-cost>=50){const result=upgradeBuilding(state,r,b,null,id);if(result.ok){onCouncilUpgrade(b,id);if(state.selected===r)updateUI();return}}}let regions=owned.filter(r=>r.buildings.length<r.slots.length).sort((a,b)=>a.buildings.length-b.buildings.length);for(const r of regions){let types=GOODS.slice().sort((a,b)=>f.stocks[a]-f.stocks[b]);let hasFarm=state.regions.some(x=>x.owner===id&&x.buildings.some(b=>b.type==='grain'&&b.product));if(f.stocks.grain<12&&!hasFarm)types=['grain',...types.filter(g=>g!=='grain')];else{let owned=state.regions.filter(x=>x.owner===id),military=['iron','cloth'].filter(g=>!owned.some(x=>x.buildings.some(b=>b.type===g&&b.product)));if(military.length)types=[...military,...types.filter(g=>!military.includes(g))]}for(const good of types){let slots=r.slots.filter(p=>!r.buildings.some(b=>b.slotId===p.id)).sort((a,b)=>productivity(good,b.terrain).rate-productivity(good,a.terrain).rate);for(const q of slots){let b={type:good,x:q.x,z:q.z,slotId:q.id,scale:q.scale,terrain:q.terrain,product:productivity(good,q.terrain),produced:0,dispatchClock:0};b.route=attachSupplyRoute(r,b,id);if(!b.route)continue;const result=build(state,good,q.x,q.z,null,id);if(result.ok){finishConstruction(result);if(state.selected===r)updateUI();return}}}}}
 
 // Sea lanes use water cells, then join the existing roads at both ends.
 function waterRoute(port, targetPort) {
@@ -5680,7 +5700,7 @@ function tradeOffersFor(state,id,owner='you',range=tradeRange(state,owner),vassa
  if(isAtWar(state,owner,id))return {reason:'Война: новые сделки приостановлены',paths,offers:[]};
  if(campaignTradeEmbargo(state,owner,id))return {reason:'Эмбарго: торговля приостановлена',paths,offers:[]};
  const buyer=factionLedger(state,id),capitalId=realmCapitalId(state,owner);
- const lands=state.regions.filter(r=>r.owner===owner&&vassalFor(state,r)===vassal);
+ const lands=state.regions.filter(r=>r.owner===owner&&!r.awaitingAdministration&&vassalFor(state,r)===vassal);
  const markets=lands.filter(r=>r.id!==capitalId&&r.market?.ready&&r.market.policy!=='capital');
  const origins=vassal?vassal.lands:[capitalId,...markets.map(r=>r.id)];
  for(const originId of origins){
@@ -5910,7 +5930,7 @@ for(const good of ['wood','iron','cloth'])$('stock-'+good).onclick=()=>{if(!stat
 $('stock-grain').onclick=()=>{if(!state.economy)return;state.economy.grainPolicy=state.economy.grainPolicy==='growth'?'trade':'growth';updateResources();flash(state.economy.grainPolicy==='trade'?'Зерно: продавать излишки':'Зерно: местное снабжение')};
 function showPlacementPrompt(){
  $('placement').hidden=false;
- $('placement').textContent='Выберите свободное графство в любом своём герцогстве · Esc — отмена';
+ $('placement').textContent='Выберите свободное графство в своём герцогстве · ПКМ — отмена';
 }
 function selectMode(type){
  closeCouncilMapPicker(false);
@@ -6295,7 +6315,7 @@ function renderCouncilVassals(){
   const troops=lands.reduce((n,r)=>n+(state.garrisons?.[r.id]?.owner==='you'?state.garrisons[r.id].troops||0:0),0);
   row.children[0].replaceChildren();
   row.children[0].insertAdjacentHTML('afterbegin',heraldryShield('vassal:'+vassal.id,16));
-  row.children[0].append(vassalDisplayName(state,vassal));
+  row.children[0].append(vassalDisplayName(state,vassal)+' · '+vassalSpecializationLabel(vassal));
   row.children[1].textContent='Титул «'+tier.name+'» · земли '+lands.map(r=>r.name).join(', ')+' · гарнизоны '+troops+' · дружина '+(generalArmy(state,vassal.owner,1,vassal.id)?.troops||0);
   row.children[2].textContent='Казна '+councilGold(vassal.gold)+' зл. · '+(vassal.militaryStatus?vassal.militaryStatus+' · ':'')+(promotion.next?'до «'+promotion.next.name+'»: '+(promotion.ok?'повышение':promotion.reason.replace('Нужно: ','')):vassal.status);
   row.onclick=()=>{
@@ -6445,17 +6465,76 @@ function updateVassalGift(vassal){
  button.title=reason||'Перевести золото из казны державы';
  $('duchy-vassal-gift-reason').textContent=reason;
 }
+function eligibleVassals(region){
+ return [...(state.vassals?.values()||[])].filter(candidate=>vassalGrantCheck(state,region,candidate.id).ok);
+}
+function vassalAssignmentOption(vassal){
+ return new Option(vassalDisplayName(state,vassal)+' · '+vassalSpecializationLabel(vassal)+' ('+vassal.lands.length+'/'+vassalTierInfo(vassal).capacity+')',String(vassal.id));
+}
+const occupationDialog=$('occupation-choice');
+function updateOccupationChoice(region){
+ if(state.defeated||region?.owner!=='you'||!region.awaitingAdministration){
+  if(occupationDialog.open)occupationDialog.close();
+  return false;
+ }
+ const select=$('occupation-vassal'),eligible=eligibleVassals(region);
+ const key=eligible.map(vassal=>vassal.id+':'+vassal.tier+':'+vassal.lands.length).join(',');
+ if(select.dataset.options!==key){
+  const selected=select.value;
+  const empty=eligible.length?'Выберите вассала':'Нет вассалов со свободным владением';
+  select.replaceChildren(new Option(empty,''),...eligible.map(vassalAssignmentOption));
+  select.value=eligible.some(vassal=>String(vassal.id)===selected)?selected:'';
+  select.disabled=!eligible.length;
+  select.dataset.options=key;
+ }
+ const {direct,capacity}=realmAdministration(state,'you');
+ const impact=$('occupation-domain-impact');
+ impact.textContent='Домен '+(direct+1)+' / '+capacity+(direct>=capacity?' · превысит лимит':' · займёт одно место');
+ impact.classList.toggle('domain-overloaded',direct>=capacity);
+ $('occupation-title').textContent=region.name;
+ $('occupation-local').disabled=!vassalGrantCheck(state,region).ok;
+ $('occupation-transfer').disabled=!select.value;
+ return true;
+}
+function openOccupationChoice(region){
+ if(!$('campaign-finale').hidden||recapPlayback||!updateOccupationChoice(region)||occupationDialog.open)return;
+ $('occupation-vassal').value='';
+ $('occupation-transfer').disabled=true;
+ $('occupation-error').hidden=true;
+ clearCameraInput();
+ occupationDialog.showModal();
+}
+function confirmOccupationChoice(choice){
+ const region=state.selected,id=$('occupation-vassal').value;
+ const result=administerCapturedDuchy(state,region,choice,id?Number(id):null);
+ if(!result.ok){
+  $('occupation-error').textContent=result.reason;
+  $('occupation-error').hidden=false;
+  updateOccupationChoice(region);
+  return;
+ }
+ occupationDialog.close();
+ const name=result.vassal?vassalDisplayName(state,result.vassal):'прямое управление';
+ flash(region.name+' · '+name);
+ updateUI();
+}
+$('occupation-later').onclick=()=>occupationDialog.close();
+$('occupation-domain').onclick=()=>confirmOccupationChoice('domain');
+$('occupation-local').onclick=()=>confirmOccupationChoice('local');
+$('occupation-transfer').onclick=()=>confirmOccupationChoice('vassal');
+$('occupation-vassal').onchange=()=>{$('occupation-transfer').disabled=!$('occupation-vassal').value};
+$('duchy-occupation-choice').onclick=()=>openOccupationChoice(state.selected);
 function updateDuchyVassal(region){
  const panel=$('duchy-vassal'),vassal=vassalFor(state,region);
  const own=region.owner==='you';
- panel.hidden=!state.started||!vassal&&(!own||!vassalGrantCheck(state,region).ok);
+ panel.hidden=!state.started||region.awaitingAdministration||!vassal&&(!own||!vassalGrantCheck(state,region).ok);
  if(panel.hidden)return;
  const select=$('duchy-vassal-select'),regionKey=String(region.id);
  if(panel.dataset.region!==regionKey){
   panel.dataset.region=regionKey;panel.open=!!vassal&&own;
   select.value='';$('duchy-vassal-amount').value='';
  }
- $('duchy-vassal-title').textContent=vassal?'Вассал · '+vassalDisplayName(state,vassal):'Передать вассалу';
+ $('duchy-vassal-title').textContent=vassal?vassalDisplayName(state,vassal)+' · '+vassalSpecializationLabel(vassal):'Передать вассалу';
  $('duchy-vassal-grant').hidden=!!vassal;
  $('duchy-vassal-account').hidden=!vassal;
  $('duchy-vassal-gift').hidden=!own;
@@ -6466,13 +6545,16 @@ function updateDuchyVassal(region){
   $('duchy-vassal-lands').textContent=lands.map(land=>land.name).join(' · ')+' ('+lands.length+'/'+tier.capacity+') · титул «'+tier.name+'»';
   if(!own)return;
   const income=lands.reduce((sum,land)=>sum+duchyTax(state,land)*VASSAL_SHARE,0);
-  $('duchy-vassal-treasury').textContent='Казна '+councilGold(vassal.gold)+' зл. · +'+councilGold(income)+' зл./мин · дружина '+(generalArmy(state,vassal.owner,1,vassal.id)?.troops||0)+(vassal.militaryStatus?' · '+vassal.militaryStatus:'');
+  const upkeep=vassalArmyUpkeep(state,vassal);
+  $('duchy-vassal-treasury').textContent='Казна '+councilGold(vassal.gold)+' зл. · налоги +'+councilGold(income)+' зл./мин'+
+   (upkeep?' · содержание −'+councilGold(upkeep)+' зл./мин':'')+' · дружина '+(generalArmy(state,vassal.owner,1,vassal.id)?.troops||0)+
+   (vassal.militaryStatus?' · '+vassal.militaryStatus:'');
   const grain=state.economy.granaries?lands.reduce((sum,land)=>sum+granaryStock(state,land.id),0):vassal.stocks.grain;
   $('duchy-vassal-stocks').innerHTML=[...GOODS,'equipment'].map(good=>{
    const value=councilGold(good==='grain'?grain:vassal.stocks[good]);
    return `<span title="${GOODS_LABELS[good]||'Снаряжение'}">${resourceGlyph(good)} ${value}</span>`;
   }).join('');
-  $('duchy-vassal-status').textContent=vassal.status+(promotion.next
+ $('duchy-vassal-status').textContent=[vassal.status,vassal.recruitmentStatus].filter(Boolean).join(' · ')+(promotion.next
    ?' · до титула «'+promotion.next.name+'»: '+(promotion.ok?'повышение':promotion.reason.replace('Нужно: ',''))
    :'');
   const last=vassal.lastAction;
@@ -6480,12 +6562,11 @@ function updateDuchyVassal(region){
   updateVassalGift(vassal);
   return;
  }
- const eligible=[...(state.vassals?.values()||[])].filter(candidate=>vassalGrantCheck(state,region,candidate.id).ok);
+ const eligible=eligibleVassals(region);
  const key=eligible.map(candidate=>candidate.id).join(',');
  if(select.dataset.options!==key){
   const previous=select.value;
-  select.replaceChildren(new Option('Назначить из местных', ''),...eligible.map(candidate=>
-   new Option('Вассал · '+vassalDisplayName(state,candidate)+' ('+candidate.lands.length+'/'+vassalTierInfo(candidate).capacity+')',String(candidate.id))));
+  select.replaceChildren(new Option('Назначить из местных', ''),...eligible.map(vassalAssignmentOption));
   select.value=eligible.some(candidate=>String(candidate.id)===previous)?previous:'';
   select.dataset.options=key;
  }
@@ -6536,6 +6617,7 @@ function updateDuchyOverview(region){
    strip.appendChild(button);
   }
  }
+ $('duchy-occupation-choice').hidden=!own||!region.awaitingAdministration;
  updateDuchyVassal(region);
  updateDuchyCity(region);
  $('realm-panel').hidden=!state.started||!own||region.id!==state.capitalId;
@@ -6618,6 +6700,7 @@ function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncM
  renderRealmPower();let r=state.selected;$('card').hidden=!r;$('slots').textContent=r&&r.owner==='you'?r.buildings.length+' / '+r.slots.length:'—';
  updateResources();
  if(r)updateDuchyCard(r);
+ if(occupationDialog.open)updateOccupationChoice(r);
 }
 
 // A compact, live ledger makes governance actionable without obscuring the map.
@@ -6785,7 +6868,7 @@ function updateVassalOverview(){
  }
  for(const [i,vassal] of vassals.entries()){
   const row=list.children[i],lands=vassal.lands.map(id=>councilRegion(state,id)).filter(Boolean);
-  row.children[0].replaceChildren();row.children[0].insertAdjacentHTML('afterbegin',heraldryShield('vassal:'+vassal.id,16));row.children[0].append(vassalDisplayName(state,vassal));
+  row.children[0].replaceChildren();row.children[0].insertAdjacentHTML('afterbegin',heraldryShield('vassal:'+vassal.id,16));row.children[0].append(vassalDisplayName(state,vassal)+' · '+vassalSpecializationLabel(vassal));
   row.children[1].textContent=lands.map(r=>r.name).join(' · ')+' · казна '+councilGold(vassal.gold)+' зл.';
   row.children[2].textContent=vassal.status;
  }
@@ -6830,7 +6913,7 @@ function updateRealmOverview(administration=realmAdministration(state,'you')){
  $('realm-empty').hidden=matches.length>0;
  let list=$('realm-overview-list'),ids=new Set(matches.map(x=>x.r.id));for(const [id,el] of realmOverviewRows)if(!ids.has(id)){el.remove();realmOverviewRows.delete(id)}
  for(const {r,c,m,u,priority,cut,port,waiting,food} of matches){let row=realmOverviewRows.get(r.id);if(!row){row=document.createElement('button');row.type='button';row.className='realm-overview-row';let title=document.createElement('strong'),stats=document.createElement('span'),reason=document.createElement('small');row.appendChild(title);row.appendChild(stats);row.appendChild(reason);row.onclick=()=>{let target=state.regions.find(x=>x.id===r.id&&x.owner==='you');if(!target)return;panel.hidden=true;toggle.setAttribute('aria-expanded','false');setSelected(target,'economy');let p=target.slots?.[0];if(p){cam.x=p.x;cam.z=p.z;dirtyLabels=true}};realmOverviewRows.set(r.id,row)}
- let cause=u?.protectedByArmy?'Армия сдерживает бунт':u?.days!=null?'Проверка риска через '+u.days+' дн.':r.occupation?.repairAt!=null?'Восстанавливается столица':r.occupation&&duchySeat(r)?.damaged?'Столица требует ремонта':u?.progress>0?'Волнения снижаются':food?'Не хватает зерна в герцогстве':cut?'Отрезано построек: '+cut:m.besieged?'Осада':!vassalFor(state,r)&&c.dist==null?'Нет связи со столицей':c.burden?'Сверх лимита · контроль −'+c.burden+' п. п.':m.recent?'Недавний захват':m.crowded?'Не хватает жилья':'Порядок';let pop=(r.buildings||[]).filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0);
+ let cause=r.awaitingAdministration?'Ожидает назначения управления':u?.protectedByArmy?'Армия сдерживает бунт':u?.days!=null?'Проверка риска через '+u.days+' дн.':r.occupation?.repairAt!=null?'Восстанавливается столица':r.occupation&&duchySeat(r)?.damaged?'Столица требует ремонта':u?.progress>0?'Волнения снижаются':food?'Не хватает зерна в герцогстве':cut?'Отрезано построек: '+cut:m.besieged?'Осада':!vassalFor(state,r)&&c.dist==null?'Нет связи со столицей':c.burden?'Сверх лимита · контроль −'+c.burden+' п. п.':m.recent?'Недавний захват':m.crowded?'Не хватает жилья':'Порядок';let pop=(r.buildings||[]).filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0);
  row.className='realm-overview-row'+(priority>=3?' urgent':priority?' warning':'');row.children[0].replaceChildren();row.children[0].insertAdjacentHTML('afterbegin',heraldryShield(r.owner+':'+r.id,16));row.children[0].append(r.name+(r.id===state.capitalId?' · столица':c.burden?' · сверх лимита':''));row.children[1].textContent='Контроль '+Math.round(c.value)+'% → '+Math.round(c.target)+'% · жители '+Math.floor(pop).toLocaleString(interfaceLocale);row.children[2].textContent=cause+' · настроение '+Math.round(m.value)+' · волнения '+Math.floor(u?.progress||0)+'%'
   +(vassalFor(state,r)?' · вассал':'')+(port?' · ожидает морской отправки '+Math.floor(waiting)+' ед.':'')}let order=matches.map(x=>x.r.id).join(',');if(list.dataset.order!==order){for(const {r} of matches)list.appendChild(realmOverviewRows.get(r.id));list.dataset.order=order}
 }
@@ -6838,7 +6921,7 @@ $('realm-overview-toggle').onclick=()=>{let panel=$('realm-overview');panel.hidd
 $('realm-overview-close').onclick=()=>{$('realm-overview').hidden=true;$('realm-overview-toggle').setAttribute('aria-expanded','false');$('domain-shortcut').setAttribute('aria-expanded','false')};
 $('domain-shortcut').onclick=$('realm-overview-toggle').onclick;
 
-function updateRealmPanel(r){let panel=$('realm-panel');if(panel.hidden)return;let q=realmPromotionCheck(state),current=q.current;$('realm-info').textContent=current.name+' · домен '+state.regions.filter(x=>x.owner==='you'&&!vassalFor(state,x)).length+' / '+current.capacity;$('realm-info').title='Размер домена зависит от размера карты ('+state.regions.length+' герцогств). Превышение постепенно снижает контроль вне столицы.';let button=$('realm-promote');button.hidden=!q.next;button.disabled=!q.ok;button.textContent=q.next?'ОСНОВАТЬ '+q.next.name.toUpperCase()+' · '+q.next.cost+' ЗЛ.':'ВЫСШИЙ РАНГ';button.title=q.reason||'Повышение уменьшит управленческое давление';$('realm-requirements').textContent=q.next?(q.ok?'Размер домена после повышения: '+q.next.capacity:q.reason):'Управление до '+current.capacity+' земель без штрафа.'}
+function updateRealmPanel(r){let panel=$('realm-panel');if(panel.hidden)return;let q=realmPromotionCheck(state),current=q.current;$('realm-info').textContent=current.name+' · домен '+realmAdministration(state,'you').direct+' / '+current.capacity;$('realm-info').title='Размер домена зависит от размера карты ('+state.regions.length+' герцогств). Превышение постепенно снижает контроль вне столицы.';let button=$('realm-promote');button.hidden=!q.next;button.disabled=!q.ok;button.textContent=q.next?'ОСНОВАТЬ '+q.next.name.toUpperCase()+' · '+q.next.cost+' ЗЛ.':'ВЫСШИЙ РАНГ';button.title=q.reason||'Повышение уменьшит управленческое давление';$('realm-requirements').textContent=q.next?(q.ok?'Размер домена после повышения: '+q.next.capacity:q.reason):'Управление до '+current.capacity+' земель без штрафа.'}
 $('realm-promote').onclick=()=>{let q=promoteRealm(state);if(!q.ok){flash(q.reason);return}flash(q.next.name+' основано · держава «'+countryName('you')+'»');updateUI()};
 function regionalWorkforceDetails(workforce){
  const number=value=>value.toLocaleString(interfaceLocale);
@@ -6948,7 +7031,7 @@ function updateDuchyCity(region){
  if(recovery){
   const check=seatRepairCheck(state,region),unrest=unrestReport(state,region,cityDefenders);
   $('duchy-city-damage').textContent=recovery.repairing?'Ремонт · осталось '+councilDays(recovery.repairSeconds):
-   recovery.damaged?'Столица повреждена · доступно 100 мест':'Ремонт завершён · жильё откроется после снабжения';
+  recovery.damaged?'Главный город повреждён':'Ремонт завершён · требуется снабжение зерном';
   $('duchy-city-food').textContent=recovery.fed?'Люди обеспечены зерном':recovery.foodDays>0?
    'Питание налаживается · запас на '+recovery.foodDays+' дн.':'Не хватает зерна · нужен местный урожай или обоз';
   $('duchy-city-unrest').textContent=(unrest?.risk?'До бунта ≈ '+unrest.days+' дн. · ':'')+
@@ -7735,6 +7818,7 @@ function drawCampaignReplay(now){
  }
 }
 function onCampaignEnd(result){
+ if(occupationDialog.open)occupationDialog.close();
  const won=result.owner==='you';
  const title=CAMPAIGN_VICTORY_NAMES[result.path]+'!';
  const recap=finishCampaignRecap(state,result,title);
@@ -7940,12 +8024,13 @@ $('occupy-neutral').onclick=()=>{
 $('petition-send').onclick=()=>{const r=state.selected,q=sendPetition(state,'you',r);if(!q.ok){flash(q.reason);updateUI();return}flash('Обоз отправлен: '+r.city+' · '+Math.ceil(q.ship.duration)+' сек.');updateUI()};
 const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест в сфере услуг и +1 к цели довольства.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает морскую торговлю с портами соперников.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
 const ICONS={
-city:'<path fill="#777466" d="M2 27l14-5 14 3v3l-16 2z"/><path fill="#e0c9a3" d="M5 25V16l5-3 4 3v10zm7 2V9l5-3 5 4v16zm9-2v-9l4-3 4 4v8z"/><path fill="#aa916f" d="M10 15l4 1v10l-4-1zm7-7 5 2v16l-5 1zm8 7 4 2v8h-4z"/><path fill="#a76047" d="M3 17l6-6 6 5-4 1-2-2-3 3zm8-7 6-8 7 8-5 1-2-3-4 4zm9 7 5-6 5 6-3 1-2-2-3 2z"/><path fill="#4d3d34" d="M7 20h2v3H7zm7-7h2v3h-2zm4 0h2v3h-2zm-3 9h3v5h-3zm8-3h2v3h-2z"/>',
-grain:'<path fill="#777d45" d="M2 24l10-6 18 5-6 6H4z"/><path fill="#bb9c55" d="m4 25 10-5 2 1-9 6zm7 3 9-6 3 1-8 5zm8 0 7-4 2 1-5 3z"/><path fill="#dfc89e" d="M8 22V13l6-5 5 5v10z"/><path fill="#9c7950" d="m16 12 3 1v10h-3z"/><path fill="#9d7146" d="M6 15l7-8 8 6-3 2-5-4-4 5z"/><path fill="#675339" d="M11 17h3v5h-3z"/><path stroke="#d5b972" stroke-width="1.5" d="M25 25V11m0 5-3-3m3 6 4-3m-4 6-4-3"/>',
-wood:'<path fill="#779366" d="m1 19 6-13 6 13H9v6H5v-6z"/><path fill="#486754" d="m7 6 6 13H9v6H7z"/><path fill="#a57853" d="M10 26V14l8-4 8 4v12z"/><path fill="#72583f" d="m18 12 8 2v12h-8z"/><path fill="#ad8460" d="m8 16 9-9 11 7-4 3-7-5-6 6z"/><path fill="#423629" d="M12 19h4v6h-4z"/><path stroke="#a78459" stroke-width="3" stroke-linecap="round" d="M19 27h11m-8-3h8m-7-3h6"/><path stroke="#d7b480" stroke-width="2" stroke-linecap="round" d="M28 27h.4m0-3h.4m-1-3h.4"/>',
-iron:'<path fill="#a7aaa0" d="M2 26l5-10 6-4 5 2 5 2 7 11-7 2H5z"/><path fill="#6b7975" d="m14 12 4 2 5 2 7 11-7 2-5-10zm-12 14 5-10 2 4-3 7z"/><path fill="#2d3a37" stroke="#c9b7a0" stroke-width="2.4" d="M9 27v-7l5-4 6 4v7z"/><path stroke="#bfc4b5" stroke-width="1.2" d="m20 13 2-2 6 3m-3 6 2 5M4 25l3-4"/><path fill="#cda56c" d="M14 25h2v2h-2z"/>',
-cloth:'<path fill="#6b5650" d="m3 23 23-1 4 4-5 3H4z"/><path fill="#85554c" d="M4 14l7-4h12l3 3v5H10L4 20z"/><path fill="#ad7868" d="M4 16v5h16v-5c0-3-4-5-7-4z"/><path fill="#d8c19a" d="M7 20l10-2h10l3 2v6H7z"/><path fill="#917b62" d="M8 20h10c3 0 5 2 5 5v2H7z"/><path fill="#ae9472" d="M3 20l5-2 7 2 2 6H3z"/><path stroke="#e4cda8" stroke-width="1.2" d="M24 20c2 1 2 3 2 5m1-6c2 2 2 4 2 6"/>',
-port:'<path fill="#548482" d="m2 26 7-2 18 1 3 2-5 2H7z"/><path fill="#845e41" d="M2 21l7 2 21-3-5 6H9z"/><path fill="#c59d6c" d="m7 23 20-2-2 2-14 2z"/><path fill="#e7dac0" d="M16 7c-4 3-7 8-7 13l7-1zm2 0c4 2 7 7 7 10l-7 2z"/><path fill="#aaa995" d="M16 8l-4 11 4-1zm2 8 6-1 1 2-7 2z"/><path stroke="#72604b" stroke-width="1.2" d="M17 5v16m-6-2 12-2"/><path fill="#c49e68" d="M17 5l7 2-7 1z"/>'};
+ city:'<path d="M4 15 16 5l12 10M7 13v14h18V13M13 27v-8h6v8M21 8V5h4v6"/>',
+ grain:'<path d="M16 29V8m0 6c-5 0-8-2-8-6 5 0 8 2 8 6zm0 7c-6 0-9-2-9-7 6 0 9 2 9 7zm0-7c5 0 8-2 8-6-5 0-8 2-8 6zm0 7c6 0 9-2 9-7-6 0-9 2-9 7zm0-13c-3-3-2-5 0-6 2 1 3 3 0 6z"/>',
+ wood:'<path d="M3 24 16 7l5 3-1 2 3 1-1 2 3 1-1 2 3 1-6 6-2-2-2 2-2-2-2 1-1-2-5 4zM19 7l3-4 8 6-3 4-3-2 1-2-3-2-1 2z"/>',
+ iron:'<path d="M6 26 20 12l2 2L8 28zM5 10c6-6 13-7 19 0 3 3 4 7 3 12-1-5-3-8-7-11-5-4-10-4-15-1z"/>',
+ cloth:'<path d="m6 25 20-20c1-1 3 1 2 2L8 27H5zm17-15 2-2M22 10c-4-6-9-4-12-2C5 12 11 15 13 14s1-5-3-4C5 11 2 17 7 20"/>',
+ port:'<path d="M16 8v18M9 14h14M5 19c0 5 4 8 11 9 7-1 11-4 11-9M3 21l2-3 3 2m16 0 3-2 2 3"/><circle cx="16" cy="6" r="3"/>'
+};
 
 for(const [type,building] of Object.entries(TYPES)){
  const button=document.createElement('button');
@@ -7958,7 +8043,7 @@ for(const [type,building] of Object.entries(TYPES)){
  button.setAttribute('aria-describedby','tip-'+type);
  button.innerHTML=`
   <kbd class="hotkey" aria-hidden="true"></kbd>
-  <span class="icon"><svg viewBox="0 0 32 32" aria-hidden="true">${ICONS[type]}</svg></span>
+  <span class="icon"><svg class="construction-glyph" viewBox="0 0 32 32" aria-hidden="true">${ICONS[type]}</svg></span>
   <span class="name">${building.name}</span>
   <span class="cost" data-game-stat="gold">${price}</span>
   <span id="tip-${type}" role="tooltip" class="tool-tip">
@@ -8001,15 +8086,15 @@ function finishConstruction(result){
  }
  state.visualJobs.push(()=>{buildingsBuffer=geometryForBuildings();rebuildRoads()});
  dirtyLabels=true;
- showConstructionFeedback(building,COUNCIL_BUILT_LABELS[building.type]);
+ showConstructionFeedback(building,COUNCIL_BUILT_LABELS[building.type],r.owner);
 }
 function onCouncilProject(kind,project,region,result){
  dirtyLabels=true;
  if(kind==='finished')finishConstruction(result);
 }
-function onCouncilUpgrade(building){
+function onCouncilUpgrade(building,owner){
  buildingsBuffer=geometryForBuildings();dirtyLabels=true;
- showConstructionFeedback(building,'Уровень '+building.level);
+ showConstructionFeedback(building,'Уровень '+building.level,owner);
 }
 function onCouncilRelief(region){
  showGain(region.slots[0],'Помощь жителям доставлена','receipt');
@@ -8154,7 +8239,7 @@ canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect(
 $('cargo-close').onclick=()=>{selectedCargo=null;selectedCargoGroup=[];$('cargo-inspector').hidden=true};
 function mapCandidates(x,y){let list=[];for(const [unit,el] of marchElements){if(el.hidden)continue;let dx=parseFloat(el.style.left)-x,dy=parseFloat(el.style.top)-y,d=Math.hypot(dx,dy);if(d<=32)list.push({el,d,label:el.title||'Армия'})}for(const [ship,el] of cargoElements){if(el.hidden)continue;let dx=parseFloat(el.style.left)-x,dy=parseFloat(el.style.top)-y,d=Math.hypot(dx,dy);if(d<=32)list.push({el,d,label:cargoDescription(ship)})}return list.sort((a,b)=>a.d-b.d)}
 function chooseMapCandidate(x,y){let options=mapCandidates(x,y);if(!options.length){$('object-chooser').hidden=true;return false}if(options.length===1){options[0].el.click();return true}let menu=$('object-chooser');menu.textContent='';menu.hidden=false;menu.style.left=Math.max(8,Math.min(canvas.clientWidth-240,x))+'px';menu.style.top=Math.max(55,Math.min(canvas.clientHeight-200,y))+'px';for(const option of options.slice(0,8)){let button=document.createElement('button');button.type='button';button.textContent=option.label;button.onclick=()=>{menu.hidden=true;option.el.click()};menu.appendChild(button)}return true}
-canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,button=drag.button,select=drag.select,startX=drag.x,startY=drag.y;let rect=canvas.getBoundingClientRect();$('selection-box').hidden=true;drag=null;if(moved){if(select){if(selectedWarship)$('placement').hidden=true;selectedWarship=null;selectArea(startX-rect.left,startY-rect.top,e.clientX-rect.left,e.clientY-rect.top)}return}if(button!==0)return;
+canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,button=drag.button,select=drag.select,startX=drag.x,startY=drag.y;let rect=canvas.getBoundingClientRect();$('selection-box').hidden=true;drag=null;if(moved){if(select){if(selectedWarship)$('placement').hidden=true;selectedWarship=null;selectArea(startX-rect.left,startY-rect.top,e.clientX-rect.left,e.clientY-rect.top)}return}if(button===2&&mode){selectMode(mode);return}if(button!==0)return;
  if(councilMapOrder){
   const hit=placementGroundAtScreen(e.clientX-rect.left,e.clientY-rect.top);
   assignCouncilAdvisor(hit?.region);
@@ -8195,10 +8280,11 @@ canvas.addEventListener('pointerup',e=>{if(!drag)return;let moved=drag.moved,but
   if(duchySeat(region))playSelectionSound('city');
  }
 });
-canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});canvas.addEventListener('wheel',e=>{e.preventDefault();let rect=canvas.getBoundingClientRect(),old=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.scale=Math.max(.0023/WORLD_SCALE,Math.min(.08,cam.scale*Math.exp(-e.deltaY*.001*preferences.zoomSpeed/100)));let next=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.x+=old.x-next.x;cam.z+=old.z-next.z;dirtyLabels=true;if(mode&&!councilMapOrder)hoverPlacement(e.clientX-rect.left,e.clientY-rect.top)},{passive:false});
+canvas.addEventListener('pointercancel',()=>{drag=null;$('selection-box').hidden=true});canvas.addEventListener('wheel',e=>{e.preventDefault();let rect=canvas.getBoundingClientRect(),old=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.scale=Math.max(MIN_MAP_ZOOM,Math.min(MAX_MAP_ZOOM,cam.scale*Math.exp(-e.deltaY*.001*preferences.zoomSpeed/100)));let next=unproject(e.clientX-rect.left,e.clientY-rect.top);cam.x+=old.x-next.x;cam.z+=old.z-next.z;dirtyLabels=true;if(mode&&!councilMapOrder)hoverPlacement(e.clientX-rect.left,e.clientY-rect.top)},{passive:false});
 function focusCapital(){let r=state.regions.find(x=>x.id===state.capitalId);if(r){cam.x=r.slots[0].x;cam.z=r.slots[0].z}cam.yaw=0;cam.tilt=DEFAULT_CAMERA_TILT;dirtyLabels=true}
 $('camera-home').onclick=focusCapital;
 window.addEventListener('keydown',e=>{
+ if(occupationDialog.open)return;
  if($('settings-panel').open)return;
  if(warAlerts.length){
   if(e.key==='Escape'){e.preventDefault?.();dismissWarAlert()}
@@ -8230,7 +8316,7 @@ window.addEventListener('keydown',e=>{
  }
  if(e.key==='Escape'&&!$('council-panel').hidden&&$('border-modal').hidden&&$('campaign-finale').hidden){showCouncil(false);return}
  if (e.key==='Escape' && !$('muster-panel').hidden && $('border-modal').hidden) {setMusterOpen(false);return}
- if(e.key==='Escape'&&selectedWarship){selectedWarship=null;$('placement').hidden=true;renderFleet();return}if(e.key==='Escape'){if(!$('campaign-finale').hidden)return;if(!$('campaign-panel').hidden){showCampaignPanel(false);return}if(!$('border-modal').hidden){closeBorderModal();return}if(selectedArmy||selectedGroup.length||selectedCargo||selectedCargoGroup.length){selectedArmy=null;selectedGroup=[];selectedCargo=null;selectedCargoGroup=[];$('placement').hidden=true;$('cargo-inspector').hidden=true;renderMarches();renderCargo()}else if(mode)selectMode(mode);
+ if(e.key==='Escape'&&selectedWarship){selectedWarship=null;$('placement').hidden=true;renderFleet();return}if(e.key==='Escape'){if(!$('campaign-finale').hidden)return;if(!$('campaign-panel').hidden){showCampaignPanel(false);return}if(!$('border-modal').hidden){closeBorderModal();return}if(selectedArmy||selectedGroup.length||selectedCargo||selectedCargoGroup.length){selectedArmy=null;selectedGroup=[];selectedCargo=null;selectedCargoGroup=[];$('placement').hidden=true;$('cargo-inspector').hidden=true;renderMarches();renderCargo()}else if(mode){clearCameraInput();globalThis.gameShell?.pause();}
  else if(!$('realm-overview').hidden)$('realm-overview-close').onclick();
  else if(!$('notifications-panel').hidden)$('notifications-toggle').onclick();
  else if(selectedBuilding)closeBuilding();

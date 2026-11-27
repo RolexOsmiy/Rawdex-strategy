@@ -1,6 +1,6 @@
 [package]
 name = "baltic-roads"
-version = "1.2.12"
+version = "1.2.15"
 description = "Балтийские пути — историческая стратегия"
 authors = ["Rawdex"]
 edition = "2021"

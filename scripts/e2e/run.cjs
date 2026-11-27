@@ -105,7 +105,14 @@ async function verifyBuildingMarkers(page){
   return !el.hidden&&Math.abs(left-x)>12&&Math.hypot(left-point.x,top-point.y)<1;
  },marker);
  if(!moved)throw Error('Строительная метка залипла при движении карты');
- await page.keyboard.press('Escape');
+ const [x,y]=await page.evaluate(()=>{
+  const world=document.getElementById('world');
+  return [[.72,.69],[.8,.4],[.6,.62]].map(([x,y])=>[Math.round(x*innerWidth),Math.round(y*innerHeight)])
+   .find(([x,y])=>document.elementFromPoint(x,y)===world);
+ });
+ await page.mouse.click(x,y,{button:'right'});
+ if(await page.evaluate(()=>mode!==null||!document.getElementById('placement').hidden))
+  throw Error('ПКМ не отменяет размещение постройки');
 }
 
 async function verifyAudioAssets(page){
