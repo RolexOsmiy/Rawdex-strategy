@@ -589,3 +589,12 @@ body,dialog{-webkit-user-select:none;user-select:none}
  background:linear-gradient(150deg,#5c472dd9,#272017f2),var(--leather) center/90px;
  filter:brightness(1.2);
 }
+
+.map-vassal-spec{display:inline-grid;place-items:center;width:15px;height:15px;margin-inline-start:5px;vertical-align:middle;border:1px solid #987f51;border-radius:3px;background:#253938;color:#efcf8d;pointer-events:auto}
+.map-vassal-spec.military{background:#542f30;color:#ffcfad}
+.map-vassal-spec.trade{background:#2b4841;color:#f0d591}
+.map-vassal-spec svg{width:11px;height:11px}
+.diplomatic-city .map-vassal-spec{margin-inline-start:1px;flex:none}
+
+.historical-shield{flex:none;vertical-align:middle}
+.map-crest-heraldry.crest-neutral{opacity:.88}

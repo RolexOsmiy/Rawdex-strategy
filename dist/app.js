@@ -9,6 +9,7 @@ const ATLAS_TILT_START=.00445/WORLD_SCALE,ATLAS_ENTER_ZOOM=.00335/WORLD_SCALE,AT
 const ATLAS_TRANSITION_MS=560;
 const atlasEase=t=>t*t*(3-2*t);
 const riverMap=new RiverMap(CAMPAIGN_RIVERS);
+const warsawStyle=typeof warsawVisuals==='undefined'?null:warsawVisuals;
 const WAGON_DETAIL_ZOOM=Math.sqrt(MIN_MAP_ZOOM*MAX_MAP_ZOOM);
 const SHIP_CLEARANCE=3.1;
 const prog=gl.createMapProgram('world');gl.useProgram(prog);
@@ -80,6 +81,7 @@ const groundAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-
 const forestAsset=loadMapTexture('maps/mediterranean/woodland.png',2,false,false,true),forestSpruceAsset=loadMapTexture('forest-spruce.png',3,false,false,true);
 const closeGroundAsset=loadMapTexture('terrain-close.png',2);
 const meadowBrushAsset=loadMapTexture('terrain-painted-meadow.png',16);
+const modelMaterialsAsset=loadMapTexture('gpu/model-materials.png',17,false);
 const materialsAsset=loadMapTexture('terrain-materials.png',4);
 const paintedMaterials=loadMapTexture('terrain-andalusia-materials.png',12);
 const habitatAsset=loadMapTexture((GAME_MAP?'maps/'+GAME_MAP.id+'/':'')+'terrain-habitats.png',14,false);
@@ -282,12 +284,17 @@ $('bot-count').oninput=updateBotSetup;
 updateBotSetup();
 updateParcelStyles([]);
 const colors={field:[.63,.68,.47],forest:[.32,.48,.35],mountain:[.55,.56,.49]},ownerColors={you:[.14,.12,.045]};
-function vertex(out,x,y,z,c){out.push(x,y,z,c[0],c[1],c[2])}
+// Store the material in the high range of the red channel to keep the existing vertex layout.
+function vertex(out,x,y,z,c){out.push(x,y,z,c[0]+2*(c.material||0),c[1],c[2])}
 function tri(out,a,b,c,col){vertex(out,...a,col);vertex(out,...b,col);vertex(out,...c,col)}
 function quad(out,a,b,c,d,col){tri(out,a,b,c,col);tri(out,a,c,d,col)}
-function tint(c,f){return c.map(v=>Math.min(1,Math.max(0,v*f)))}
-function makeBuffer(values){let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(values),gl.STATIC_DRAW);return {buffer:b,count:values.length/6}}
-function drawBuffer(b,kind=gl.TRIANGLES,weights=null,edge=0){if(!b||!b.count)return;gl.bindBuffer(gl.ARRAY_BUFFER,b.buffer);gl.vertexAttribPointer(loc.p,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(loc.c,3,gl.FLOAT,false,24,12);if(weights){gl.bindBuffer(gl.ARRAY_BUFFER,weights.buffer);gl.enableVertexAttribArray(loc.edge);gl.vertexAttribPointer(loc.edge,1,gl.FLOAT,false,4,0)}else{gl.disableVertexAttribArray(loc.edge);gl.vertexAttrib1f(loc.edge,edge)}gl.drawArrays(kind,0,b.count)}
+function tint(c,f){
+ const shade=c.map(v=>Math.min(1,Math.max(0,v*f)));
+ if(c.material)shade.material=c.material;
+ return shade;
+}
+function makeBuffer(values){let b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,values instanceof Float32Array?values:new Float32Array(values),gl.STATIC_DRAW);return {buffer:b,count:values.length/6}}
+function drawBuffer(b,kind=gl.TRIANGLES,weights=null,edge=0){if(!b||!b.count)return;gl.bindBuffer(gl.ARRAY_BUFFER,b.buffer);gl.vertexAttribPointer(loc.p,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(loc.c,3,gl.FLOAT,false,24,12);if(weights){gl.bindBuffer(gl.ARRAY_BUFFER,weights.buffer);gl.enableVertexAttribArray(loc.edge);gl.vertexAttribPointer(loc.edge,1,gl.FLOAT,false,4,0)}else{gl.disableVertexAttribArray(loc.edge);gl.vertexAttrib1f(loc.edge,edge)}gl.drawArrays(kind,b.first??0,b.count)}
 const regionMeshes=new Map(),terrainSummary=new Map(),placementMeshes=new Map();
 let terrainMinHeight=Infinity,terrainMaxHeight=-Infinity;
 function mixColor(a,b,t){return a.map((v,i)=>v*(1-t)+b[i]*t)}
@@ -340,7 +347,8 @@ function landscapeRelief(x,z){
 }
 function surfaceHeight(x,z){
  const h=landscapeRelief(x,z),t=Math.min(1,coastDistance(x,z)/6);
- return -1+localRelief(x,z,.08+.19*h)*t*t*(3-2*t);
+ const relief=localRelief(x,z,.08+.19*h)+(warsawStyle?.relief(x,z)||0);
+ return -1+relief*t*t*(3-2*t);
 }
 // World-space moisture and warmth samples. The material baker reads these same anchors.
 const REGIONAL_CLIMATE={
@@ -498,7 +506,7 @@ function createTerrain(){
    const size=Math.abs((b.x-a.x)*(c.z-a.z)-(b.z-a.z)*(c.x-a.x))*.5;
    counts[terrainAt((a.x+b.x+c.x)/3,(a.z+b.z+c.z)/3)]+=size;
   }
-  regionMeshes.set(mesh.id,makeBuffer(vertices));
+  regionMeshes.set(mesh.id,{...makeBuffer(vertices),bounds:terrainBounds(positions,3)});
   terrainSummary.set(mesh.id,counts);
   placementMeshes.set(mesh.id,{positions,indices:mesh.i});
  }
@@ -525,6 +533,7 @@ function roundTimber(out,x,y,z,length,radius,col,sides=10){
  }
 }
 function tiledRoof(out,x,y,z,w,d,rise,col){
+ if(!col.material)col=modelMaterial([...col],'roof');
  const e=w/2,z0=z-d/2,z1=z+d/2;
  tri(out,[x-e,y,z0],[x+e,y,z0],[x,y+rise,z0],tint(col,.79));
  tri(out,[x-e,y,z1],[x+e,y,z1],[x,y+rise,z1],tint(col,.91));
@@ -539,7 +548,8 @@ function tiledRoof(out,x,y,z,w,d,rise,col){
  timberBeam(out,[x,y+rise,z0-.06],[x,y+rise,z1+.06],.24,tint(col,1.18));
 }
 function buildingHouse(out,x,y,z,w,h,d,wall,roofColor){
- const timber=[.29,.22,.16],glass=[.16,.20,.19],trim=[.56,.48,.36],front=z+d/2;
+ const timber=modelMaterial([.29,.22,.16],'timber'),glass=[.16,.20,.19],trim=modelMaterial([.56,.48,.36],'stone'),front=z+d/2;
+ if(!wall.material)wall=modelMaterial([...wall],'plaster');
  cube(out,x,y,z,w,h,d,wall);
  cube(out,x,y,z,w+.35,.52,d+.3,trim);
  tiledRoof(out,x,y+h,z,w+.85,d+.85,Math.min(4.1,w*.41),roofColor);
@@ -549,6 +559,8 @@ function buildingHouse(out,x,y,z,w,h,d,wall,roofColor){
   cube(out,window,y+h*.58,front+.15,Math.max(.62,w*.19),h*.23,.16,trim);
   cube(out,window,y+h*.61,front+.25,Math.max(.42,w*.13),h*.17,.10,glass);
   cube(out,window,y+h*.61,front+.32,.10,h*.17,.08,timber);
+  cube(out,window-sign*w*.12,y+h*.58,front+.23,w*.063,h*.22,.13,tint(timber,1.37));
+  cube(out,window,y+h*.55,front+.28,w*.215,.085,.24,trim);
   timberBeam(out,[corner,y+h*.53,front+.18],[window,y+h*.35,front+.18],.15,timber);
   cube(out,x+sign*(w/2+.08),y+h*.43,z,.19,.26,d,timber);
   cube(out,x+sign*(w/2+.10),y+h*.59,z-d*.15,.23,h*.23,Math.max(.45,d*.18),trim);
@@ -558,15 +570,16 @@ function buildingHouse(out,x,y,z,w,h,d,wall,roofColor){
  cube(out,x,y+h*.45,front+.13,w,.22,.22,timber);
  cube(out,x-w*.24,y+h*.9,z-d*.14,.78,h*.58,.86,trim);
  cube(out,x-w*.24,y+h*1.44,z-d*.14,.98,.24,1,timber);
+ cube(out,x,y+.22,front+.31,Math.max(.82,w*.24),.16,.47,trim);
 }
 // Buildings are authored in model units; each independent structure sits on its own footing.
 function farmFooting(b,dx,dz){
  const s=b.scale??.34;
  return (surfaceHeight(b.x+dx*s,b.z+dz*s)-surfaceHeight(b.x,b.z))/s;
 }
-const farmPlaster=[.85,.80,.65],farmStone=[.52,.49,.39],farmOak=[.34,.235,.15];
+const farmPlaster=modelMaterial([.85,.80,.65],'plaster'),farmStone=modelMaterial([.52,.49,.39],'stone'),farmOak=modelMaterial([.34,.235,.15],'timber');
 function hippedFarmRoof(out,x,y,z,w,d,rise){
- const tile=[.66,.351,.224],e=w*.5,hip=Math.min(w*.26,d*.36),half=d*.5;
+ const tile=modelMaterial([.66,.351,.224],'roof'),e=w*.5,hip=Math.min(w*.26,d*.36),half=d*.5;
  // Short hips and unequal courses keep the long ridge legible at the normal camera angle.
  for(const side of [-1,1]){
   const p=(t,k)=>[x+(2*k-1)*(e-hip*t),y+rise*t,z+side*half*(1-t)];
@@ -632,10 +645,16 @@ function farmRing(out,x,y,z,rings,col){
  }
 }
 function grainSack(out,x,y,z,size){
- const cloth=[.73,.64,.45];
+ const cloth=modelMaterial([.73,.64,.45],'cloth');
  farmRing(out,x,y,z,[[0,.41*size],[.19*size,.61*size],[.72*size,.55*size],
   [.96*size,.19*size],[1.11*size,.23*size],[1.13*size,.02*size]],cloth);
  farmRing(out,x,y,z,[[.92*size,.22*size],[1.01*size,.22*size]],farmOak);
+}
+function hayStook(out,x,y,z,size){
+ const straw=modelMaterial([.72,.59,.31],'thatch');
+ farmRing(out,x,y,z,[[0,.36*size],[.15*size,.46*size],[.33*size,.39*size],
+  [.55*size,.22*size],[.67*size,.10*size],[.72*size,.035*size]],straw);
+ farmRing(out,x,y,z,[[.41*size,.34*size],[.44*size,.32*size]],tint(farmOak,1.26));
 }
 function millSails(out,cx,cy,cz,s,angle){
  for(let i=0;i<4;i++){
@@ -867,7 +886,7 @@ function refreshUrbanPaint(all){
  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,data);
 }
 function coastalTownHall(out,x,y,z,level,flag){
- const cream=[.85,.78,.62],trim=[.66,.58,.45],tile=[.63,.34,.23],dark=[.22,.22,.18];
+ const cream=modelMaterial([.85,.78,.62],'plaster'),trim=modelMaterial([.66,.58,.45],'stone'),tile=modelMaterial([.63,.34,.23],'roof'),dark=[.22,.22,.18];
  cube(out,x-2,y-1.2,z-1,9.5,1.65,6.2,trim);
  cube(out,x-2,y+.45,z-1,9.2,4.65,5.9,cream);
  hippedFarmRoof(out,x-2,y+5.1,z-1,10.2,6.7,2.35);
@@ -892,14 +911,19 @@ function coastalTownHall(out,x,y,z,level,flag){
  if(level>=2)farmRange(out,x-4.25,y,z-4.62,5.6,2.8,2.68);
  if(level>=3)farmRange(out,x+1.48,y,z-4.88,4.8,3.0,3.51);
 }
-function coastalTownHome(out,p,stage){
+function coastalTownHome(out,p,stage,detailed=true){
  const v=[],w=p.w,d=p.d;
  if(p.arid){
   const h=.91+(p.seed%4)*.14+(stage>=8&&p.seed%5===0?.59:0);
-  const clay=[[.71,.58,.41],[.76,.66,.49],[.81,.71,.55],[.65,.53,.37]][p.seed%4];
+  const clay=modelMaterial([[.71,.58,.41],[.76,.66,.49],[.81,.71,.55],[.65,.53,.37]][p.seed%4],'plaster');
   const face=[.29,.25,.18],ridge=tint(clay,1.12);
   cube(v,0,-.30,0,w+.05,.37,d+.05,tint(clay,.79));
   cube(v,0,.06,0,w,h,d,clay);
+  if(!detailed){
+   cube(v,0,h+.04,0,w,.14,d,ridge);
+   appendPaintedModel(out,v,p.x,p.y+.06,p.z,p.heading);
+   return;
+  }
   for(const side of [-1,1]){
    cube(v,side*(w*.5-.05),h+.04,0,.102,.18,d,ridge);
    cube(v,0,h+.04,side*(d*.5-.05),w,.18,.102,ridge);
@@ -907,6 +931,8 @@ function coastalTownHome(out,p,stage){
   }
   cube(v,-w*.15,.07,d*.5+.025,.20,h*.59,.06,face);
   cube(v,w*.24,h*.54,d*.5+.032,.17,.167,.067,face);
+  cube(v,0,h*.81,d*.5+.036,w*.82,.09,.065,ridge);
+  cube(v,-w*.15,.026,d*.5+.09,.34,.100,.16,tint(clay,.76));
   if(p.seed%3===0){
    for(let i=0;i<3;i++)cube(v,w*.27,.055+i*.11,d*.51+.085*(3-i),.32,.14,.16,ridge);
   }else if(p.seed%3===1)cube(v,w*.22,h-.02,-d*.19,.36,.23,.31,ridge);
@@ -916,14 +942,18 @@ function coastalTownHome(out,p,stage){
  }
  const upperFloor=p.rank<8.4&&stage>=9+p.seed%11;
  const h=.90+(p.seed%4)*.125+(p.rank<5.4?.27:0)+(upperFloor?.64:0),rise=d*(.28+(p.seed%3)*.08);
- const cream=(p.north?[[.64,.47,.37],[.69,.66,.55],[.59,.51,.40],[.62,.57,.45]]:[[.80,.72,.56],[.85,.80,.69],[.72,.63,.50],[.76,.69,.57]])[p.seed%4];
- const roof=(p.north?[[.32,.34,.36],[.49,.31,.22],[.36,.37,.35],[.53,.34,.24]]:[[.60,.32,.22],[.55,.34,.25],[.67,.39,.26],[.56,.40,.29]])[(p.seed*3)%4];
- const trim=[.48,.42,.33],shade=[.23,.25,.21],e=w*.5+.11,f=d*.5+.10,hip=p.north?0:Math.min(w*.2,d*.32);
+ const cream=modelMaterial((p.north?[[.64,.47,.37],[.69,.66,.55],[.59,.51,.40],[.62,.57,.45]]:[[.80,.72,.56],[.85,.80,.69],[.72,.63,.50],[.76,.69,.57]])[p.seed%4],'plaster');
+ const roof=modelMaterial((p.north?[[.32,.34,.36],[.49,.31,.22],[.36,.37,.35],[.53,.34,.24]]:[[.60,.32,.22],[.55,.34,.25],[.67,.39,.26],[.56,.40,.29]])[(p.seed*3)%4],'roof');
+ const trim=modelMaterial([.48,.42,.33],'timber'),shade=[.23,.25,.21],e=w*.5+.11,f=d*.5+.10,hip=p.north?0:Math.min(w*.2,d*.32);
  cube(v,0,-.52,0,w+.06,.63,d+.07,trim);
  cube(v,0,.10,0,w,h-.10,d,cream);
  const a=[-e,h,-f],b=[e,h,-f],c=[e,h,f],q=[-e,h,f],l=[-e+hip,h+rise,0],r=[e-hip,h+rise,0];
  quad(v,a,b,r,l,tint(roof,1.12));quad(v,c,q,l,r,tint(roof,.94));
  tri(v,b,c,r,tint(roof,.83));tri(v,q,a,l,roof);
+ if(!detailed){
+  appendPaintedModel(out,v,p.x,p.y+.09,p.z,p.heading);
+  return;
+ }
  timberBeam(v,l,r,.075,tint(roof,1.15));
  const front=d/2+.03;
  if(upperFloor){
@@ -934,6 +964,8 @@ function coastalTownHome(out,p,stage){
  cube(v,-w*.22,.10,front,.23,h*.52,.06,shade);
  cube(v,w*.23,h*.50,front,.20,.24,.065,shade);
  cube(v,w*.23,h*.49,front+.03,.27,.045,.09,trim);
+ cube(v,w*.23,h*.52,front+.045,.025,.18,.025,tint(trim,1.2));
+ cube(v,-w*.22,.035,front+.057,.32,.087,.13,tint(trim,1.19));
  if(p.seed%3===0)cube(v,w*.26,h+.06,-.07,.18,rise+.35,.20,cream);
  if(p.seed%3===1){
   quad(v,[.02,h*.68,front],[w*.43,h*.68,front],[w*.43,h*.57,front+.21],[.02,h*.57,front+.21],[.49,.52,.40]);
@@ -956,10 +988,11 @@ function coastalTownHome(out,p,stage){
 }
 function marketStall(out,x,z,cloth){
  const y=surfaceHeight(x,z)+.12;
+ cloth=modelMaterial(cloth,'cloth');
  for(const i of [-1,1])for(const j of [-1,1])cube(out,x+i*.43,y-.18,z+j*.29,.074,1.04,.074,farmOak);
  cube(out,x,y+.31,z,.90,.16,.58,[.49,.37,.25]);
  for(let i=0;i<4;i++){
-  const l=x-.55+i*.275,r=l+.275,col=i%2?cloth:[.83,.74,.55];
+  const l=x-.55+i*.275,r=l+.275,col=i%2?cloth:modelMaterial([.83,.74,.55],'cloth');
   quad(out,[l,y+.88,z-.39],[r,y+.88,z-.39],[r,y+1.03,z],[l,y+1.03,z],col);
   quad(out,[l,y+1.03,z],[r,y+1.03,z],[r,y+.82,z+.41],[l,y+.82,z+.41],tint(col,.92));
  }
@@ -976,7 +1009,7 @@ function drawCoastalDistrict(out,r,slot,b){
   }
  }
 }
-const millBark=[.32,.238,.16],millOak=[.46,.32,.19],millCut=[.78,.61,.37];
+const millBark=modelMaterial([.32,.238,.16],'timber'),millOak=modelMaterial([.46,.32,.19],'timber'),millCut=modelMaterial([.78,.61,.37],'timber');
 function millLog(out,x,y,z,length,radius){
  roundTimber(out,x,y,z,length,radius,millBark,8);
  for(const side of [-1,1]){
@@ -1000,7 +1033,7 @@ function millShelter(out,x,y,z,width,depth,height){
   }
   timberBeam(out,[x-w,y+eave(s),z+s*(d-.24)],[x+w,y+eave(s),z+s*(d-.24)],.38,millOak);
  }
- const count=Math.ceil(width/.70),roof=[.38,.34,.27];
+ const count=Math.ceil(width/.70),roof=modelMaterial([.38,.34,.27],'timber');
  for(let i=0;i<count;i++){
   const l=x-w+i*width/count,r=l+width/count-.018;
   const lip=.09*Math.sin(i*3.5);
@@ -1020,6 +1053,11 @@ function sawmillYard(out,b,x,y,z){
  const level=b.level||1,ground=(dx,dz)=>y+farmFooting(b,dx,dz);
  const bench=ground(0,0);
  millShelter(out,x,bench,z-2.1,8.8,4.2,5.4);
+ for(const side of [-1,1]){
+  timberBeam(out,[x+side*3.76,bench+5.03,z-4.14],[x+side*.37,bench+2.26,z-4.14],.23,millOak);
+  timberBeam(out,[x+side*3.92,bench+.39,z-.47],[x+side*3.92,bench+.39,z-3.64],.27,millBark);
+  cube(out,x+side*3.97,bench-.11,z-4.03,.70,.36,.68,mineStone);
+ }
  for(const s of [-1,1]){
   cube(out,x+s*2.75,bench,z+.70,.51,2.05,1.45,millOak);
   cube(out,x+s*2.75,bench+2.05,z+.70,.68,.31,2.02,millBark);
@@ -1064,7 +1102,7 @@ function sawFrame(out,x,y,z,s,stroke){
  cube(out,x,body+.83*s,foot-.08*s,.39*s,.43*s,.39*s,skin);
  cube(out,x,body+1.15*s,foot-.09*s,.51*s,.14*s,.47*s,[.52,.38,.22]);
 }
-const mineTimber=[.40,.29,.18],mineIron=[.34,.37,.39],mineStone=[.50,.48,.43];
+const mineTimber=modelMaterial([.40,.29,.18],'timber'),mineIron=modelMaterial([.34,.37,.39],'metal'),mineStone=modelMaterial([.50,.48,.43],'stone');
 function oreRock(out,x,y,z,r,h,angle,col){
  const tip=[x+r*.16,y+h,z-r*.18];
  for(let i=0;i<5;i++){
@@ -1144,6 +1182,14 @@ function drawMineStructure(out,b,x,y,z,preview){
   quad(out,innerB,back(innerB),back(innerA),innerA,tint(stone,.60));
   tri(out,[ax,aditBase+1.54,front-.40],back(innerA),back(innerB),[.099,.084,.078]);
  }
+ const cartX=ax+.18,cartZ=az+2.33,cartBase=foot(cartX-x,cartZ-z);
+ cube(out,cartX,cartBase+.25,cartZ,1.13,.28,.78,wood);
+ for(const side of [-1,1]){
+  cube(out,cartX,cartBase+.50,cartZ+side*.40,1.27,.45,.09,wood);
+  cube(out,cartX+side*.58,cartBase+.50,cartZ,.088,.45,.81,tint(wood,.87));
+  for(const dx of [-.35,.35])wheel(out,cartX+dx,cartBase+.31,cartZ+side*.48,.21,0);
+ }
+ for(const [dx,dz] of [[-.31,-.20],[.12,.22],[.35,-.04]])oreRock(out,cartX+dx,cartBase+.52,cartZ+dz,.26,.26,dx*9,stone);
  timberBeam(out,[ax-1.04,aditBase,front+.07],[ax-1.04,aditBase+1.54,front+.07],.22,wood);
  timberBeam(out,[ax+1.04,aditBase,front+.07],[ax+1.04,aditBase+1.54,front+.07],.22,wood);
  for(let i=0;i<13;i++){
@@ -1192,8 +1238,8 @@ function drawMineStructure(out,b,x,y,z,preview){
   quad(out,[bx-.31,fy+1.38,bz+1.25],[bx+.31,fy+1.38,bz+1.25],[bx+.36,tip[1],tip[2]],[bx-.36,tip[1],tip[2]],tint(wood,1.22));
  }
 }
-const loomOak=[.40,.28,.17],loomStone=[.53,.51,.43];
-const loomLinen=[.78,.69,.51],loomMadder=[.64,.26,.19],loomIndigo=[.24,.38,.59];
+const loomOak=modelMaterial([.40,.28,.17],'timber'),loomStone=modelMaterial([.53,.51,.43],'stone');
+const loomLinen=modelMaterial([.78,.69,.51],'cloth'),loomMadder=modelMaterial([.64,.26,.19],'cloth'),loomIndigo=modelMaterial([.24,.38,.59],'cloth');
 function clothRoll(out,x,y,z,length,radius,dye){
  roundTimber(out,x,y,z,length,radius,dye,10);
  const linen=tint(loomLinen,.92);
@@ -1273,6 +1319,13 @@ function drawWeavingYard(out,b,x,y,z){
  }
  timberBeam(out,[hx-3.55,hall+4.02,hz+2.11],[hx+3.55,hall+4.02,hz+2.11],.32,loomOak);
  hippedFarmRoof(out,hx,hall+4.08,hz,7.6,4.75,1.83);
+ const panelZ=hz+2.15;
+ for(const [dx,color] of [[-2.4,loomIndigo],[2.36,loomMadder]]){
+  const px=hx+dx;
+  quad(out,[px-.54,hall+3.72,panelZ],[px+.57,hall+3.72,panelZ],
+   [px+.47,hall+2.33,panelZ+.12],[px-.56,hall+2.40,panelZ+.12],color);
+  timberBeam(out,[px-.54,hall+2.45,panelZ+.13],[px+.47,hall+2.38,panelZ+.13],.057,loomLinen);
+ }
  handloom(out,x-2.12,ground(-2.12,2.20),z+2.20);
  clothRack(out,x+1.80,ground(1.8,5.65),z+5.65,6.10,2.99,[loomMadder,loomIndigo,loomLinen]);
  const by=ground(-4.2,2.62);
@@ -1329,7 +1382,7 @@ function northernTown(out,b,x,y,z,faction){
  if(b.level>=3)buildingHouse(out,x+2.3,local(2.3,5.65),z+5.65,3.29,3.02,3.03,brick,tile);
 }
 function northernFarm(out,b,x,y,z,ghost){
- const local=(dx,dz)=>y+farmFooting(b,dx,dz),walls=[.70,.64,.49],thatch=[.51,.43,.29];
+ const local=(dx,dz)=>y+farmFooting(b,dx,dz),walls=[.70,.64,.49],thatch=modelMaterial([.51,.43,.29],'thatch');
  buildingHouse(out,x+1.6,local(1.6,-2.8),z-2.8,7.10,3.0,4.15,walls,thatch);
  const mx=x-4.0,my=local(-4.0,-1.10),mz=z-1.10;
  cube(out,mx,my-.28,mz,2.68,1.25,2.57,loomStone);
@@ -1340,6 +1393,10 @@ function northernFarm(out,b,x,y,z,ghost){
  timberBeam(out,[mx,my+.02,mz],[mx,my+5.28,mz],.43,loomOak);
  buildingHouse(out,mx,my+3.25,mz,2.92,2.14,2.94,[.48,.36,.25],[.33,.35,.33]);
  if(ghost)millSails(out,mx,my+5.05,mz+1.72,.76,.48);
+ const troughY=local(4.45,1.45),troughZ=z+1.45;
+ for(const px of [x+3.58,x+5.35])cube(out,px,troughY-.13,troughZ,.25,.53,.92,farmOak);
+ cube(out,x+4.45,troughY+.29,troughZ,2.25,.18,.78,farmOak);
+ for(const dz of [-.35,.35])cube(out,x+4.45,troughY+.44,troughZ+dz,2.18,.22,.12,tint(farmOak,1.32));
  for(const [dx,dz] of [[-3.0,3.05],[-1.92,3.32],[-2.64,4.24],[1.19,3.62]])grainSack(out,x+dx,local(dx,dz),z+dz,1.13);
  if(b.level>=2){
   const sy=local(4.65,2.42);
@@ -1352,7 +1409,8 @@ function northernFarm(out,b,x,y,z,ghost){
  }
 }
 function aridTown(out,b,x,y,z,flag){
- const plinth=[.57,.47,.34],plaster=[.76,.64,.47],sun=[.83,.73,.53];
+ const plinth=modelMaterial([.57,.47,.34],'stone');
+ const plaster=modelMaterial([.76,.64,.47],'plaster'),sun=tint(plaster,1.11);
  cube(out,x-1.2,y-.46,z-.85,10,1,7.4,plinth);
  for(const [dx,dz,w,d,h] of [[-3.55,-1.5,3.62,5.72,3.25],[.22,-3.07,4.32,2.62,3.92],[1.88,.26,2.72,3.78,3.52]]){
   cube(out,x+dx,y+.39,z+dz,w,h,d,plaster);
@@ -1360,7 +1418,16 @@ function aridTown(out,b,x,y,z,flag){
    cube(out,x+dx+side*(w*.5-.17),y+h+.36,z+dz,.34,.48,d,sun);
    cube(out,x+dx,y+h+.36,z+dz+side*(d*.5-.16),w,.46,.32,sun);
   }
-  cube(out,x+dx,y+1.47,z+dz+d*.5+.03,.59,.88,.15,[.27,.23,.17]);
+  for(const side of [-1,1]){
+   const wx=x+dx+side*w*.22,front=z+dz+d*.5;
+   cube(out,wx,y+1.51,front+.021,.51,.72,.082,[.27,.23,.17]);
+   cube(out,wx,y+1.43,front+.08,.59,.092,.19,plinth);
+   for(const upright of [-1,0,1])cube(out,wx+upright*.13,y+1.53,front+.078,.034,.64,.058,loomOak);
+   cube(out,wx,y+2.22,front+.057,.57,.094,.115,sun);
+  }
+  const roof=z+dz-d*.23;
+  for(const side of [-1,1])cube(out,x+dx+side*.42,y+h+.40,roof,.12,.64,.14,loomOak);
+  timberBeam(out,[x+dx-.49,y+h+1.01,roof],[x+dx+.49,y+h+1.01,roof],.14,loomOak);
  }
  const tx=x-3.2,tz=z-2.1;
  cube(out,tx,y+.52,tz,1.77,7.6,1.84,plaster);
@@ -1460,16 +1527,53 @@ function makeCoastalWoods(){
 function packForestVertices(data){
  const buffer=gl.createBuffer();
  gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
- gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);
+ gl.bufferData(gl.ARRAY_BUFFER,data instanceof Float32Array?data:new Float32Array(data),gl.STATIC_DRAW);
  return {buffer,count:data.length/7};
 }
 function packForestSprites(data){
- const stamps=new Float32Array(data.length/42*8);
+ const stamps=new Float32Array(data.length/42*8),cells=new Map(),tileSize=72,groveSize=6;
  for(let i=0,j=0;i<data.length;i+=42,j+=8){
+  const x=data[i],z=data[i+2],key=Math.floor(z/tileSize)+':'+Math.floor(x/tileSize);
   const u0=data[i+5],u1=data[i+12],v0=data[i+20],v1=data[i+6];
-  stamps.set([data[i],data[i+2],Math.abs(data[i+3]),data[i+18],Math.min(u0,u1),v0,Math.abs(u1-u0),v1-v0],j);
+  stamps.set([x,z,Math.abs(data[i+3]),data[i+18],Math.min(u0,u1),v0,Math.abs(u1-u0),v1-v0],j);
+  let tile=cells.get(key);
+  if(!tile){tile={trees:[],groves:new Map()};cells.set(key,tile)}
+  tile.trees.push(i);
+  const groveKey=Math.floor(x/groveSize)+':'+Math.floor(z/groveSize);
+  let grove=tile.groves.get(groveKey);
+  if(!grove){grove={x:0,z:0,trees:[]};tile.groves.set(groveKey,grove)}
+  grove.x+=x;grove.z+=z;grove.trees.push(i);
  }
- return {...packForestVertices(data),stamps};
+ const groveCount=[...cells.values()].reduce((count,tile)=>count+tile.groves.size,0)*6;
+ const packed=new Float32Array(data.length+groveCount*7),tiles=[];
+ let detailOffset=0,groveOffset=data.length;
+ for(const {trees,groves} of cells.values()){
+  const detailFirst=detailOffset/7,groveFirst=groveOffset/7;
+  let width=0,height=0;
+  for(const i of trees){
+   for(let k=0;k<42;k++)packed[detailOffset++]=data[i+k];
+   width=Math.max(width,Math.abs(data[i+3]));height=Math.max(height,data[i+18]);
+  }
+  for(const grove of groves.values()){
+   const count=grove.trees.length,x=grove.x/count,z=grove.z/count;
+   let center=grove.trees[0],nearest=Infinity;
+   for(const i of grove.trees){
+    const gap=(data[i]-x)**2+(data[i+2]-z)**2;
+    if(gap<nearest){center=i;nearest=gap}
+   }
+   const spread=1+Math.min(.43,(Math.sqrt(count)-1)*.23);
+   for(let k=0;k<42;k++)packed[groveOffset++]=data[center+k]*(k%7===3?spread:1);
+   width=Math.max(width,Math.abs(data[center+3])*spread);
+  }
+  const bounds=terrainBounds(packed.subarray(detailFirst*7,detailOffset),7);
+  tiles.push({bounds,width,height,detail:{first:detailFirst,count:detailOffset/7-detailFirst},
+   grove:{first:groveFirst,count:groveOffset/7-groveFirst}});
+ }
+ return {...packForestVertices(packed),tiles,stamps,groveCount,detailCount:data.length/7};
+}
+function forestDetail(view){
+ const pixelsPerUnit=view.scale*view.height*.5;
+ return atlasEase(Math.max(0,Math.min(1,(pixelsPerUnit-5.8)/2.2)));
 }
 function woodlandRoadIndex(){
  const size=24,cells=new Map();
@@ -1536,22 +1640,31 @@ function forestSprites(){
  trees.sort((a,b)=>a.z-b.z);
  for(const tree of trees){
   const {x,z,y,kind,size,flip}=tree;
+  const weight=warsawStyle?.influence(x,z)||0;
+  const grove=weight?warsawStyle.grove(x,z):0;
+  const seed=Math.sin(x*31.7+z*18.9)*43758.5453;
+  const clear=weight*(1-grove)*.63>seed-Math.floor(seed);
+  const treeSize=size*(1+weight*(grove*.25-.065));
   const riparian=kind==='palm'||kind==='poplar';
   const target=riparian?floodplain:kind==='oak'?deciduous:kind==='spruce'?pines:scrub;
-  const half=size*({oak:2.43,spruce:1.54,scrub:1.32,palm:2.35,poplar:1.70}[kind]),height=size*({oak:4.82,spruce:5.50,scrub:2.46,palm:5.24,poplar:5.12}[kind]);
+  const half=treeSize*({oak:2.43,spruce:1.54,scrub:1.32,palm:2.35,poplar:1.70}[kind]),height=treeSize*({oak:4.82,spruce:5.50,scrub:2.46,palm:5.24,poplar:5.12}[kind]);
   if(kind==='oak'||riparian){
    const variant=riparian?Math.floor(rand()*2)+(kind==='poplar'?2:0):Math.floor(rand()*4),u=(variant%2)*.5,v=Math.floor(variant/2)*.5;
+    if(clear)continue;
    appendTreeSprite(target,x,z,y,half,height,flip,u+.002,u+.498,v+.002,v+.498);
-  }else appendTreeSprite(target,x,z,y,half,height,flip,kind==='scrub'?.005:0,kind==='scrub'?.495:1);
+  }else{
+   if(clear)continue;
+   appendTreeSprite(target,x,z,y,half,height,flip,kind==='scrub'?.005:0,kind==='scrub'?.495:1);
+  }
   if(kind==='scrub'&&size<.68)continue;
-  shadow.push({x:x+half*.56,z:z+half*.44,rx:half*1.62,rz:half*1.04,opacity:.28});
+  shadow.push({x:x+half*(.56+weight*.19),z:z+half*(.44+weight*.15),rx:half*1.62,rz:half*1.04,opacity:.28+weight*.07});
  }
  return {...packForestSprites(deciduous),spruce:packForestSprites(pines),scrub:packForestSprites(scrub),floodplain:packForestSprites(floodplain),
   shadows:shadow,trees:trees.length};
 }
 const coastalWoods=makeCoastalWoods();
 const treeProgram=gl.createMapProgram('forest');
-const treeLoc={tone:gl.getUniformLocation(treeProgram,'uWidth'),orchard:gl.getUniformLocation(treeProgram,'uPaintPlots'),p:gl.getAttribLocation(treeProgram,'aPosition'),uv:gl.getAttribLocation(treeProgram,'aUV'),offset:gl.getAttribLocation(treeProgram,'aOffset'),orientation:gl.getUniformLocation(treeProgram,'uOrientation'),tilt:gl.getUniformLocation(treeProgram,'uTilt'),center:gl.getUniformLocation(treeProgram,'uCenter'),viewport:gl.getUniformLocation(treeProgram,'uViewport'),scale:gl.getUniformLocation(treeProgram,'uScale'),texture:gl.getUniformLocation(treeProgram,'uTree'),mask:gl.getUniformLocation(treeProgram,'uForestMask')};
+const treeLoc={tone:gl.getUniformLocation(treeProgram,'uWidth'),fade:gl.getUniformLocation(treeProgram,'uParcel'),orchard:gl.getUniformLocation(treeProgram,'uPaintPlots'),p:gl.getAttribLocation(treeProgram,'aPosition'),uv:gl.getAttribLocation(treeProgram,'aUV'),offset:gl.getAttribLocation(treeProgram,'aOffset'),orientation:gl.getUniformLocation(treeProgram,'uOrientation'),tilt:gl.getUniformLocation(treeProgram,'uTilt'),center:gl.getUniformLocation(treeProgram,'uCenter'),viewport:gl.getUniformLocation(treeProgram,'uViewport'),scale:gl.getUniformLocation(treeProgram,'uScale'),texture:gl.getUniformLocation(treeProgram,'uTree'),mask:gl.getUniformLocation(treeProgram,'uForestMask')};
 let oliveBuffer=null,oliveSignature='';
 function rebuildOlives(){
  if(!oliveAsset)return;
@@ -1625,7 +1738,25 @@ function rebuildBuildingShadows(){
  buildingShadows=packForestVertices(data);
 }
 function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgram(treeProgram);gl.uniform1f(treeLoc.orchard,0);gl.uniform2f(treeLoc.center,cam.x,cam.z);gl.uniform2f(treeLoc.viewport,canvas.width,canvas.height);gl.uniform1f(treeLoc.scale,mapView().scale);cameraUniforms(treeLoc);gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.uniform1i(treeLoc.mask,5);gl.enableVertexAttribArray(treeLoc.p);gl.enableVertexAttribArray(treeLoc.uv);gl.enableVertexAttribArray(treeLoc.offset);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
- function group(mesh,asset,unit,cool=false){if(!mesh.count)return;gl.uniform1f(treeLoc.tone,cool?1:0);gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,asset.texture);gl.uniform1i(treeLoc.texture,unit);gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);gl.vertexAttribPointer(treeLoc.p,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(treeLoc.offset,2,gl.FLOAT,false,28,12);gl.vertexAttribPointer(treeLoc.uv,2,gl.FLOAT,false,28,20);gl.drawArrays(gl.TRIANGLES,0,mesh.count)}
+ const view=mapView();
+ gl.uniform1f(treeLoc.fade,0);
+ function group(mesh,asset,unit,cool=false,level=null){
+  if(!mesh?.count||!asset?.ready)return;
+  gl.uniform1f(treeLoc.tone,cool?1:0);gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,asset.texture);gl.uniform1i(treeLoc.texture,unit);
+  gl.bindBuffer(gl.ARRAY_BUFFER,mesh.buffer);gl.vertexAttribPointer(treeLoc.p,3,gl.FLOAT,false,28,0);gl.vertexAttribPointer(treeLoc.offset,2,gl.FLOAT,false,28,12);gl.vertexAttribPointer(treeLoc.uv,2,gl.FLOAT,false,28,20);
+  if(!level){gl.drawArrays(gl.TRIANGLES,0,mesh.count);return}
+  let first=0,count=0;
+  for(const tile of mesh.tiles){
+   if(terrainInView(tile.bounds,view,tile.width,tile.height)){
+    if(!count)first=tile[level].first;
+    count+=tile[level].count;
+   }else if(count){
+    gl.drawArrays(gl.TRIANGLES,first,count);
+    count=0;
+   }
+  }
+  if(count)gl.drawArrays(gl.TRIANGLES,first,count);
+ }
  if(shadowsOnly){
   if(actorShadowVertices.length){
    gl.bindBuffer(gl.ARRAY_BUFFER,actorShadows.buffer);
@@ -1641,10 +1772,26 @@ function drawForest(shadowsOnly=false){if(!forestAsset.ready)return;gl.useProgra
   group(buildingShadows,forestAsset,2);
   gl.depthMask(true);gl.uniform1f(treeLoc.orchard,0);
  }
- if(coastalWoods&&woodlandAsset.ready)group(coastalWoods.crowns,woodlandAsset,2);
- if(woodlandAsset.ready)group(forestSpriteBuffer,woodlandAsset,2);if(forestSpruceAsset.ready)group(forestSpriteBuffer.spruce,forestSpruceAsset,3,true);
- if(floodplainAsset.ready)group(forestSpriteBuffer.floodplain,floodplainAsset,2);
- if(forestSpriteBuffer.scrub.count&&oliveAsset?.ready)group(forestSpriteBuffer.scrub,oliveAsset,2);
+ const trees=forestDetail(view);
+ const woodland=(level,fade)=>{
+  gl.uniform1f(treeLoc.fade,fade);
+  group(coastalWoods?.crowns,woodlandAsset,2,false,level);
+  group(forestSpriteBuffer,woodlandAsset,2,false,level);
+  group(forestSpriteBuffer.spruce,forestSpruceAsset,3,true,level);
+  group(forestSpriteBuffer.floodplain,floodplainAsset,2,false,level);
+  group(forestSpriteBuffer.scrub,oliveAsset,2,false,level);
+ };
+ if(trees<1){
+  if(trees>0)gl.depthMask(false);
+  woodland('grove',trees);
+  gl.depthMask(true);
+ }
+ if(trees>0)woodland('detail',1-trees);
+ gl.uniform1f(treeLoc.fade,0);
+ if(farmHedgeBuffer?.count&&woodlandAsset.ready){
+  gl.uniform1f(treeLoc.orchard,1);
+  for(const chunk of farmHedgeBuffer.chunks.values())group(chunk,woodlandAsset,2);
+ }
  if(oliveBuffer?.count&&oliveAsset.ready){gl.uniform1f(treeLoc.orchard,1);group(oliveBuffer,oliveAsset,2)}
  }
  gl.disable(gl.BLEND);gl.useProgram(prog);for(const i of [treeLoc.p,treeLoc.uv,treeLoc.offset])if(i!==loc.p&&i!==loc.c)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(loc.p);gl.enableVertexAttribArray(loc.c)}
@@ -1665,14 +1812,132 @@ function updateForestMask(){const n=256,data=riverForestMask?.slice()||new Uint8
   riverForestMask=data.slice();
  }
  for(const r of state.regions){if(r.owner==='neutral')clearAt(r.slots[0]);else for(const b of r.buildings){let slot=r.slots.find(q=>q.id===b.slotId),cell=slot&&typeof PARCEL_DATA!=='undefined'?PARCEL_DATA[r.id]?.cells?.[slot.id]:null;const localYard=(b.type==='wood'||b.type==='iron'||b.type==='cloth')&&r.id===pilotLand?.region;if(cell&&b.type!=='wood'&&!localYard){for(const index of cell.mask){data[index*4]=255;data[index*4+3]=255}}else clearAt(b,localYard?7.5:5)}if(state.garrisons?.[r.id]?.troops>0)clearAt({x:r.slots[0].x+3,z:r.slots[0].z+3})}for(const army of state.fieldArmies||[])clearAt({x:army.location.point.x+3,z:army.location.point.z+3});gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,forestMask);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,n,n,0,gl.RGBA,gl.UNSIGNED_BYTE,data);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE)}
-function addArmyCamp(v,p,troops,owner){let y=roadGround(p.x,p.z)+.5,col=FACTION_COLORS[owner]||FACTION_COLORS.you,tents=Math.min(5,1+Math.floor(troops/200));for(let i=0;i<tents;i++){let x=p.x+2.5+i*1.8,z=p.z+2.5,base=y+.1,a=[x-.65,base,z-.55],b=[x+.65,base,z-.55],c=[x+.65,base,z+.55],d=[x-.65,base,z+.55],top1=[x,base+1.1,z-.55],top2=[x,base+1.1,z+.55];quad(v,a,top1,top2,d,[.64,.58,.43]);quad(v,top1,b,c,top2,[.76,.68,.49]);tri(v,a,b,top1,[.60,.53,.39]);tri(v,d,top2,c,[.60,.53,.39])}let n=Math.min(24,Math.max(6,Math.ceil(troops/15)));for(let i=0;i<n;i++){let x=p.x+2+(i%6)*.42,z=p.z+4+Math.floor(i/6)*.45;cube(v,x,y+.35,z,.18,.65,.18,col);cube(v,x,y+.78,z,.17,.18,.17,[.78,.68,.52])}cube(v,p.x+2,y+1.1,p.z+2,.06,2,.06,[.38,.3,.2]);cube(v,p.x+2,y+1.8,p.z+2.3,.06,.5,.6,col)}
+function addArmyCamp(out,p,troops,owner){
+ const y=roadGround(p.x,p.z)+.50,col=modelMaterial([...(FACTION_COLORS[owner]||FACTION_COLORS.you)],'cloth');
+ const canvas=modelMaterial([.75,.67,.49],'cloth'),oak=modelMaterial([.40,.29,.18],'timber');
+ const helms=modelMaterial([.69,.72,.70],'metal'),boots=modelMaterial([.27,.19,.14],'leather');
+ const tents=Math.min(5,1+Math.floor(troops/200));
+ for(let i=0;i<tents;i++){
+  const x=p.x+2.5+i*1.8,z=p.z+2.5,base=y+.10;
+  const a=[x-.67,base,z-.64],b=[x+.67,base,z-.64],c=[x+.72,base,z+.70],d=[x-.72,base,z+.70];
+  const ridge=[x,base+1.10,z-.55],front=[x,base+1.02,z+.53];
+  quad(out,a,ridge,front,d,tint(canvas,.87));
+  quad(out,ridge,b,c,front,canvas);
+  tri(out,a,b,ridge,tint(canvas,.78));
+  const left=[x-.26,base,z+.70],right=[x+.26,base,z+.70];
+  tri(out,d,front,left,tint(canvas,.91));
+  tri(out,right,front,c,tint(canvas,.95));
+  tri(out,left,[x,base+.71,z+.58],right,[.23,.19,.14]);
+  timberBeam(out,ridge,front,.044,oak);
+  timberBeam(out,[x,base,z+.67],front,.041,oak);
+ }
+ const soldiers=Math.min(24,Math.max(6,Math.ceil(troops/15)));
+ for(let i=0;i<soldiers;i++){
+  const x=p.x+2+(i%6)*.42,z=p.z+4+Math.floor(i/6)*.45;
+  for(const side of [-1,1])cube(out,x+side*.052,y+.02,z,.086,.29,.11,boots);
+  cube(out,x,y+.25,z,.23,.35,.19,col);
+  paintedOval(out,x,y+.70,z,.10,.135,.11,helms,5);
+  cube(out,x+.11,y+.24,z+.03,.053,.31,.17,oak);
+ }
+ cube(out,p.x+2,y,p.z+2,.075,2.34,.075,oak);
+ quad(out,[p.x+2,y+2.22,p.z+2],[p.x+2,y+2.13,p.z+2.65],
+  [p.x+2,y+1.75,p.z+2.61],[p.x+2,y+1.80,p.z+2],col);
+}
 // Parcel geometry is baked from the historical province mesh, not circles.
-let parcelSignature='',parcelSurfaceSignature='',parcelDecorBuffer=null;const parcelDecorCache=new Map();
+let parcelSignature='',parcelSurfaceSignature='',parcelDecorBuffer=null,farmHedgeBuffer=null;
+let housingDetailBuffer=null,housingProxyBuffer=null;
+const parcelDecorCache=new WeakMap();
 function parcelCell(r,slot){return typeof PARCEL_DATA==='undefined'?null:PARCEL_DATA[r.id]?.cells?.[slot.id]||null}
 // Stable, low-poly auxiliary scenery distributed over each actual parcel.
-function parcelDecorPoints(r,slot,b){let cell=parcelCell(r,slot);if(!cell)return [];let level=Math.max(1,Math.min(3,b.level||1)),pool=[],seen=new Set(),seed=(r.id+1)*37+(slot.id+1)*109,noise=n=>{let v=Math.sin(n*12.9898+seed*78.233)*43758.5453;return v-Math.floor(v)},inside=(x,z)=>slotAt(r,x,z)?.id===slot.id,minBuildingDistance=Math.max(1,Math.min(3.5,Math.sqrt(cell.area)*.25));function candidate(x,z,key){let signature=Math.round(x*5)+':'+Math.round(z*5);if(seen.has(signature)||Math.hypot(x-b.x,z-b.z)<minBuildingDistance||!inside(x,z))return;for(const [dx,dz] of [[.42,0],[-.42,0],[0,.42],[0,-.42]])if(!inside(x+dx,z+dz))return;seen.add(signature);let fullFit=true;for(const [dx,dz] of [[.95,0],[-.95,0],[0,.95],[0,-.95]])if(!inside(x+dx,z+dz)){fullFit=false;break}pool.push({x,z,rank:noise(key+71),fullFit,distance:Math.hypot(x-b.x,z-b.z)})}for(const index of cell.mask){let ix=index%256,iz=Math.floor(index/256),x=ix/255*WORLD_WIDTH+(noise(index+5)-.5)*2.4,z=iz/255*WORLD_HEIGHT+(noise(index+29)-.5)*1.7;candidate(x,z,index)}if(pool.length<16){let step=Math.max(3,Math.ceil(cell.i.length/900)*3);for(let i=0;i+2<cell.i.length;i+=step){let a=cell.i[i]*2,c=cell.i[i+1]*2,d=cell.i[i+2]*2;candidate((cell.v[a]+cell.v[c]+cell.v[d])/3,(cell.v[a+1]+cell.v[c+1]+cell.v[d+1])/3,i+100000)}}pool.sort((a,b)=>a.rank-b.rank);let near=pool.filter(p=>p.fullFit&&p.distance>=2.5).slice().sort((a,b)=>a.distance-b.distance).slice(0,3),ordered=[...near,...pool.filter(p=>!near.includes(p))],baseCount=Math.min(44,Math.max(8,Math.ceil(cell.area/90))),count=Math.min(44,baseCount+4*(level-1)),spacing=Math.max(.8,Math.min(2.6,Math.sqrt(cell.area)/(Math.sqrt(baseCount)*2.5))),points=[];for(const p of ordered){if(points.some(q=>Math.hypot(q.x-p.x,q.z-p.z)<spacing))continue;let i=points.length,kind;if(b.type==='grain')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%5===3&&p.fullFit?'hay':null;else if(b.type==='wood')kind=i<2&&p.fullFit?'woodpile':i%5===2&&p.fullFit?'hut':null;else if(b.type==='iron')kind=i<2&&p.fullFit&&p.distance>=2.5?'minehut':i%4===2&&p.fullFit?'ore':null;else if(b.type==='cloth')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'rack':null;else if(b.type==='port')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'crate':null;else kind=i<4&&p.fullFit&&p.distance>=2.5?'hut':null;points.push({x:p.x,z:p.z,kind});if(points.length>=count)break}return points}
+function parcelDecorPoints(r,slot,b){let cell=parcelCell(r,slot);if(!cell)return [];let level=Math.max(1,Math.min(3,b.level||1)),pool=[],seen=new Set(),seed=(r.id+1)*37+(slot.id+1)*109,noise=n=>{let v=Math.sin(n*12.9898+seed*78.233)*43758.5453;return v-Math.floor(v)},inside=(x,z)=>slotAt(r,x,z)?.id===slot.id,minBuildingDistance=Math.max(1,Math.min(3.5,Math.sqrt(cell.area)*.25));function candidate(x,z,key){let signature=Math.round(x*5)+':'+Math.round(z*5);if(seen.has(signature)||Math.hypot(x-b.x,z-b.z)<minBuildingDistance||!inside(x,z))return;for(const [dx,dz] of [[.42,0],[-.42,0],[0,.42],[0,-.42]])if(!inside(x+dx,z+dz))return;if(b.type==='grain'){const river=riverMap.nearest({x,z},4.2);if(river&&river.distance<river.segment.width*1.14+1.0)return}seen.add(signature);let fullFit=true;for(const [dx,dz] of [[.95,0],[-.95,0],[0,.95],[0,-.95]])if(!inside(x+dx,z+dz)){fullFit=false;break}pool.push({x,z,rank:noise(key+71),fullFit,distance:Math.hypot(x-b.x,z-b.z)})}for(const index of cell.mask){let ix=index%256,iz=Math.floor(index/256),x=ix/255*WORLD_WIDTH+(noise(index+5)-.5)*2.4,z=iz/255*WORLD_HEIGHT+(noise(index+29)-.5)*1.7;candidate(x,z,index)}if(pool.length<16){let step=Math.max(3,Math.ceil(cell.i.length/900)*3);for(let i=0;i+2<cell.i.length;i+=step){let a=cell.i[i]*2,c=cell.i[i+1]*2,d=cell.i[i+2]*2;candidate((cell.v[a]+cell.v[c]+cell.v[d])/3,(cell.v[a+1]+cell.v[c+1]+cell.v[d+1])/3,i+100000)}}pool.sort((a,b)=>a.rank-b.rank);let near=pool.filter(p=>p.fullFit&&p.distance>=2.5).slice().sort((a,b)=>a.distance-b.distance).slice(0,3),ordered=[...near,...pool.filter(p=>!near.includes(p))],baseCount=Math.min(44,Math.max(8,Math.ceil(cell.area/90))),count=Math.min(44,baseCount+4*(level-1)),spacing=Math.max(.8,Math.min(2.6,Math.sqrt(cell.area)/(Math.sqrt(baseCount)*2.5))),points=[];for(const p of ordered){if(points.some(q=>Math.hypot(q.x-p.x,q.z-p.z)<spacing))continue;let i=points.length,kind;if(b.type==='grain')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%5===3&&p.fullFit?'hay':null;else if(b.type==='wood')kind=i<2&&p.fullFit?'woodpile':i%5===2&&p.fullFit?'hut':null;else if(b.type==='iron')kind=i<2&&p.fullFit&&p.distance>=2.5?'minehut':i%4===2&&p.fullFit?'ore':null;else if(b.type==='cloth')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'rack':null;else if(b.type==='port')kind=i<2&&p.fullFit&&p.distance>=2.5?'hut':i%4===2&&p.fullFit?'crate':null;else kind=i<4&&p.fullFit&&p.distance>=2.5?'hut':null;points.push({x:p.x,z:p.z,kind});if(points.length>=count)break}return points}
 
-function parcelHut(out,x,z,variant){let y=surfaceHeight(x,z)+.22,wall=variant==='minehut'?[.52,.51,.46]:[.68,.61,.48],roofColor=variant==='minehut'?[.32,.30,.27]:[.43,.30,.23],w=1.5,d=1.15,h=.95;cube(out,x,y,z,w,h,d,wall);let a=[x-w*.58,y+h,z-d*.55],b=[x+w*.58,y+h,z-d*.55],c=[x+w*.58,y+h,z+d*.55],e=[x-w*.58,y+h,z+d*.55],top1=[x,y+h+.62,z-d*.55],top2=[x,y+h+.62,z+d*.55];quad(out,a,top1,top2,e,roofColor);quad(out,top1,b,c,top2,tint(roofColor,.78));tri(out,a,b,top1,roofColor);tri(out,e,top2,c,roofColor);cube(out,x,y+.12,z+d*.51,.26,.58,.08,[.28,.24,.20])}
+function parcelHut(out,x,z,variant){
+ const y=surfaceHeight(x,z)+.22,mine=variant==='minehut';
+ const wall=modelMaterial(mine?[.52,.51,.46]:[.68,.61,.48],mine?'stone':'timber');
+ const roof=modelMaterial(mine?[.32,.30,.27]:[.48,.36,.22],mine?'roof':'thatch');
+ const timber=modelMaterial([.35,.26,.18],'timber');
+ cube(out,x,y-.13,z,1.59,.25,1.21,modelMaterial([.48,.44,.36],'stone'));
+ cube(out,x,y+.08,z,1.50,.88,1.15,wall);
+ tiledRoof(out,x,y+.96,z,1.77,1.36,.62,roof);
+ cube(out,x-.22,y+.09,z+.591,.35,.64,.066,timber);
+ cube(out,x+.36,y+.50,z+.595,.27,.24,.056,tint(timber,.58));
+ cube(out,x+.36,y+.47,z+.599,.31,.053,.072,timber);
+}
+function farmCottage(out,x,z,farm){
+ const parts=[],variant=Math.abs(Math.round(x*13+z*19))%7;
+ const granary=variant%3===1,w=granary?1.63:1.83,d=granary?1.17:1.32,h=granary?.89:1.04;
+ const oak=modelMaterial([.35,.23,.15],'timber'),lintel=modelMaterial([.49,.34,.22],'timber'),stone=modelMaterial([.55,.51,.44],'stone');
+ const wall=granary?modelMaterial([.56,.43,.29],'timber'):modelMaterial([.81,.72,.56],'plaster');
+ const roof=granary?[.47,.35,.26]:[.55,.37,.26];
+ const facade=(x,y,z,w,h,color)=>quad(parts,[x-w/2,y,z],[x+w/2,y,z],[x+w/2,y+h,z],[x-w/2,y+h,z],color);
+ cube(parts,0,-.24,0,w+.12,.46,d+.10,stone);
+ cube(parts,0,.19,0,w,h-.19,d,wall);
+ for(let row=0;row<2;row++){
+  for(let block=0;block<5;block++){
+   const bx=(block-2)*w*.18+(row-.5)*.054;
+   const color=tint(stone,.87+((block*3+row+variant)%6)*.056);
+   for(const side of [-1,1])facade(bx,.024+row*.079,side*d*.532,w*.165,.072,color);
+  }
+ }
+ const front=d*.5+.031;
+ for(const side of [-1,1]){
+  cube(parts,side*(w/2-.11),.17,front,.104,h-.15,.068,oak);
+  cube(parts,side*(w/2+.029),.19,0,.062,.092,d,lintel);
+  cube(parts,side*(w/2+.032),h-.10,0,.068,.13,d,lintel);
+  const x=side*(w/2+.038),sill=side*(w/2+.054);
+  quad(parts,[x,.51,-.33],[x,.51,-.09],[x,.76,-.09],[x,.76,-.33],[.20,.22,.20]);
+  cube(parts,sill,.49,-.21,.04,.055,.29,lintel);
+ }
+ cube(parts,0,h-.12,front,w,.13,.074,oak);
+ cube(parts,0,.18,front,w,.083,.07,lintel);
+ if(granary){
+  for(let i=1;i<11;i++)for(const side of [-1,1])facade((i/11-.5)*w,.28,side*(front+.004),.018,h-.39,tint(oak,1.16));
+ }else{
+  for(const side of [-1,1]){
+   const bx=side*w*.28;
+   timberBeam(parts,[side*(w/2-.1),.25,front+.018],[bx,.63,front+.018],.052,oak);
+   cube(parts,bx,.55,front+.037,.28,.235,.047,lintel);
+   facade(bx,.58,front+.088,.193,.177,[.16,.20,.19]);
+   facade(bx,.58,front+.095,.026,.177,oak);
+   for(const shutter of [-1,1])cube(parts,bx+shutter*.16,.55,front+.062,.087,.228,.037,[.34,.40,.33]);
+  }
+ }
+ const door=granary?.49:.34;
+ cube(parts,0,.16,front+.028,door+.10,.60,.08,lintel);
+ cube(parts,0,.19,front+.092,door,.52,.058,[.30,.215,.13]);
+ for(const seam of [-.25,0,.25])facade(door*seam,.21,front+.126,.014,.48,oak);
+ cube(parts,door*.23,.44,front+.148,.046,.039,.025,[.62,.49,.30]);
+ cube(parts,0,.02,front+.12,door+.12,.13,.28,stone);
+ const eave=w*.55,tip=d*.60,rise=granary?.56:.68;
+ for(const end of [-1,1]){
+  tri(parts,[-w/2,h,end*d/2],[w/2,h,end*d/2],[0,h+rise,end*d/2],tint(wall,end===1?.85:.67));
+  facade(0,h+.12,end*(d/2+.008),.19,.17,oak);
+  facade(0,h+.13,end*(d/2+.014),.11,.125,[.22,.22,.18]);
+  timberBeam(parts,[-eave,h,end*tip],[0,h+rise,end*tip],.068,oak);
+  timberBeam(parts,[0,h+rise,end*tip],[eave,h,end*tip],.068,oak);
+ }
+ for(const side of [-1,1]){
+  const p=(u,v,lift=0)=>[side*eave*(1-u),h+rise*u+lift,(v*2-1)*tip];
+  const courses=5,boards=7;
+  for(let row=0;row<courses;row++){
+   const lo=row/courses,hi=(row+1)/courses;
+   for(let i=0;i<=boards;i++){
+    const a=Math.max(0,(i-.5*(row%2))/boards),b=Math.min(1,(i+1-.5*(row%2))/boards);
+    if(b<=a)continue;
+    const color=tint(roof,(side<0?1.06:.86)*(.86+((i*7+row*3+variant)%9)*.038));
+    quad(parts,p(lo,a,.032),p(hi,a),p(hi,b),p(lo,b,.032),color);
+   }
+   timberBeam(parts,p(lo,0,.033),p(lo,1,.033),.027,tint(roof,.74));
+  }
+ }
+ timberBeam(parts,[0,h+rise,-tip-.026],[0,h+rise,tip+.026],.103,tint(roof,1.19));
+ if(!granary){
+  cube(parts,-.35,h+.28,-.32,.23,.68,.25,[.52,.35,.27]);
+  for(const row of [.55,.73,.91])cube(parts,-.35,h+row,-.32,.24,.024,.26,[.67,.52,.42]);
+  cube(parts,-.35,h+.95,-.32,.30,.071,.31,stone);
+ }
+ appendPaintedModel(out,parts,x,surfaceHeight(x,z)+.04,z,Math.atan2(x-farm.x,farm.z-z));
+}
 function parcelTrail(out,r,slot,a,b){let dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);if(length<.1)return;let nx=-dz/length*.11,nz=dx/length*.11,steps=Math.max(2,Math.ceil(length/2));for(let i=0;i<steps;i++){let t=i/steps,u=(i+1)/steps,x=a.x+dx*t,z=a.z+dz*t,xx=a.x+dx*u,zz=a.z+dz*u,mid=slotAt(r,(x+xx)/2,(z+zz)/2);if(!mid||mid.id!==slot.id||slotAt(r,x,z)?.id!==slot.id||slotAt(r,xx,zz)?.id!==slot.id)continue;let y=surfaceHeight(x,z)+.3,yy=surfaceHeight(xx,zz)+.3;quad(out,[x+nx,y,z+nz],[xx+nx,yy,zz+nz],[xx-nx,yy,zz-nz],[x-nx,y,z-nz],[.52,.45,.33])}}
 // Population controls the amount of housing drawn inside the city's own parcel.
 // Positions are deterministic and form a compact settlement around the city centre.
@@ -1710,10 +1975,12 @@ function appendCityGrowth(out,r,slot,b,points){
   }
  }
 }
-function fieldMargins(out,r,slot,b){
+function farmBoundaryKind(b){
  const {moisture,warmth}=landscapeClimate(b.x,b.z);
- const walls=GAME_MAP&&warmth>.57&&moisture<.67;
- const thickets=moisture>.57;
+ if(GAME_MAP&&warmth>.57&&moisture<.67)return 'wall';
+ return moisture>.57?'hedge':'fence';
+}
+function fieldMargins(out,r,slot,b,kind){
  const angle=farmVariation(r,slot)*.39+.31,cs=Math.cos(angle),sn=Math.sin(angle);
  const roads=roadsNearSite(r,b,15);
  const point=(u,v)=>({x:b.x+u*cs-v*sn,z:b.z+u*sn+v*cs});
@@ -1732,12 +1999,22 @@ function fieldMargins(out,r,slot,b){
    if(!admissible(a)||!admissible(c))continue;
    const y=surfaceHeight(a.x,a.z),yy=surfaceHeight(c.x,c.z);
    if(Math.abs(y-yy)>.56)continue;
-   if(walls){
+   if(kind==='wall'){
     const stone=tint([.61,.56,.46],.80+i%4*.07);
     timberBeam(out,[a.x,y+.18,a.z],[c.x,yy+.18,c.z],.37,stone);
     if(i%2===0)oreRock(out,a.x,y+.26,a.z,.28,.19,i*.7,tint(stone,1.16));
-   }else if(thickets){
-    oreRock(out,a.x,y,a.z,.57,.77+(i%3)*.12,i*.89,tint([.23,.39,.26],.86+i%5*.08));
+   }else if(kind==='hedge'){
+    const seed=(i*17+r.id+slot.id*5+(side>0?2:0))%31;
+    const roots=point(u+.17*(seed%3-1),v+.071*(seed%5-2));
+    const foliage=riverMap.nearest(roots,3.4);
+    if(foliage&&foliage.distance<foliage.segment.width+.52)continue;
+    const frame=seed%4,tx=(frame%2)*.5,tz=Math.floor(frame/2)*.5;
+    const height=.82+(seed%7)*.093,width=.56+(seed%5)*.052;
+    appendTreeSprite(out,roots.x,roots.z,surfaceHeight(roots.x,roots.z)+.045,width,height,seed%2===0,tx+.005,tx+.495,tz+.006,tz+.326);
+    if(seed%3===0){
+     const sapling=point(u+.33,v+side*.17);
+     if(admissible(sapling))appendTreeSprite(out,sapling.x,sapling.z,surfaceHeight(sapling.x,sapling.z)+.041,width*.70,height*.68,seed%2!==0,tx+.005,tx+.495,tz+.021,tz+.324);
+    }
    }else {
     cube(out,a.x,y,a.z,.10,.59,.12,[.41,.32,.22]);
     timberBeam(out,[a.x,y+.43,a.z],[c.x,yy+.43,c.z],.072,[.43,.33,.23]);
@@ -1751,10 +2028,10 @@ function appendParcelDecor(out,r,slot,b){
   drawCoastalDistrict(out,r,slot,b);
   return;
  }
- let key=r.id+':'+slot.id+':'+b.type+':'+(b.level||1)+':'+cityGrowthStage(b),cached=parcelDecorCache.get(key);if(!cached){cached=[];let houses=b.type==='city'?cityGrowthPoints(r,slot,b):[],points=parcelDecorPoints(r,slot,b);if(b.type==='grain'&&r.id===pilotLand?.region){
+ let key=r.id+':'+slot.id+':'+b.type+':'+(b.level||1)+':'+cityGrowthStage(b),entry=parcelDecorCache.get(b),cached=entry?.key===key?entry.vertices:null;if(!cached){cached=[];let houses=b.type==='city'?cityGrowthPoints(r,slot,b):[],points=parcelDecorPoints(r,slot,b);if(b.type==='grain'&&r.id===pilotLand?.region){
  points=points.filter(p=>p.kind==='hay'&&Math.hypot(b.x-p.x,b.z-p.z)<6);
-}for(const p of points){if(!p.kind)continue;if(b.type==='city'&&(p.kind==='hut'||houses.some(h=>Math.hypot(h.x-p.x,h.z-p.z)<1.5)))continue;let x=p.x,z=p.z,y=surfaceHeight(x,z)+.25;if(p.kind==='hut'||p.kind==='minehut'){parcelHut(cached,x,z,p.kind);parcelTrail(cached,r,slot,{x:b.x,z:b.z},p)}else if(p.kind==='hay'){cube(cached,x,y,z,.68,.46,.48,[.71,.59,.32]);cube(cached,x+.5,y,z+.18,.56,.38,.43,[.63,.50,.28])}else if(p.kind==='woodpile'){for(let j=0;j<3;j++)cube(cached,x,y+j*.17,z,1.15,.15,.25,[.49+j*.04,.36,.24])}else if(p.kind==='ore'){cone(cached,x,y,z,.65,.65,[.42,.43,.41],5)}else if(p.kind==='rack'){cube(cached,x-.5,y,z,.08,1.15,.08,[.36,.28,.20]);cube(cached,x+.5,y,z,.08,1.15,.08,[.36,.28,.20]);quad(cached,[x-.5,y+1,z],[x+.5,y+1,z],[x+.5,y+.45,z],[x-.5,y+.45,z],[.75,.65,.55])}else if(p.kind==='crate'){cube(cached,x,y,z,.60,.55,.55,[.49,.36,.25])}}if(b.type==='city')appendCityGrowth(cached,r,slot,b,houses);if(b.type==='grain'&&r.id!==pilotLand?.region)fieldMargins(cached,r,slot,b);parcelDecorCache.set(key,cached)}for(const n of cached)out.push(n)}
-function updateMeshBatch(previous,groups){
+}for(const p of points){if(!p.kind)continue;if(b.type==='city'&&(p.kind==='hut'||houses.some(h=>Math.hypot(h.x-p.x,h.z-p.z)<1.5)))continue;let x=p.x,z=p.z,y=surfaceHeight(x,z)+.25;if(p.kind==='hut'||p.kind==='minehut'){if(b.type==='grain')farmCottage(cached,x,z,b);else parcelHut(cached,x,z,p.kind);parcelTrail(cached,r,slot,{x:b.x,z:b.z},p)}else if(p.kind==='hay'){hayStook(cached,x,y,z,.79);hayStook(cached,x+.53,y,z+.18,.65)}else if(p.kind==='woodpile'){for(let j=0;j<3;j++)millLog(cached,x,y+j*.17,z+(j%2)*.18,1.15,.105)}else if(p.kind==='ore'){oreRock(cached,x,y,z,.51,.59,.7,modelMaterial([.47,.48,.44],'stone'))}else if(p.kind==='rack'){cube(cached,x-.5,y,z,.08,1.15,.08,[.36,.28,.20]);cube(cached,x+.5,y,z,.08,1.15,.08,[.36,.28,.20]);quad(cached,[x-.5,y+1,z],[x+.5,y+1,z],[x+.5,y+.45,z],[x-.5,y+.45,z],modelMaterial([.75,.65,.55],'cloth'))}else if(p.kind==='crate'){harborCargo(cached,x,y,z,.60,false)}}if(b.type==='city')appendCityGrowth(cached,r,slot,b,houses);cached=Float32Array.from(cached);parcelDecorCache.set(b,{key,vertices:cached})}for(const n of cached)out.push(n)}
+function updateMeshBatch(previous,groups,pack=makeBuffer){
  const chunks=new Map();
  let count=0;
  for(const [id,group] of groups){
@@ -1764,7 +2041,7 @@ function updateMeshBatch(previous,groups){
    if(chunk)gl.deleteBuffer(chunk.buffer);
    const vertices=[];
    for(const item of group)item.append(vertices);
-   chunk={...makeBuffer(vertices),signature};
+   chunk={...pack(vertices),signature};
   }
   count+=chunk.count;
   chunks.set(id,chunk);
@@ -1776,8 +2053,41 @@ function addMeshItem(groups,id,item){
  if(!groups.has(id))groups.set(id,[]);
  groups.get(id).push(item);
 }
-function drawMeshBatch(batch){
- if(batch)for(const chunk of batch.chunks.values())drawBuffer(chunk);
+function packStaticModels(vertices){
+ const mesh=makeBuffer(vertices);
+ if(mesh.count)mesh.bounds=terrainBounds(vertices,6);
+ return mesh;
+}
+function drawMeshBatch(batch,view){
+ if(batch)for(const chunk of batch.chunks.values()){
+  if(!view||!chunk.bounds||terrainInView(chunk.bounds,view))drawBuffer(chunk);
+ }
+}
+function settlementTile(region){
+ const {x,z}=region.slots[0],size=160;
+ return Math.floor(x/size)+':'+Math.floor(z/size);
+}
+function addSettlementHousing(detail,proxies,region,slot,building,appendDetail){
+ const tile=settlementTile(region),stage=cityGrowthStage(building);
+ const district=region.id===pilotLand?.region&&region.owner!=='neutral';
+ const signature=[region.id,slot.id,stage,building.level||1,region.owner==='neutral'].join(':');
+ addMeshItem(detail,tile,{signature,append:appendDetail});
+ addMeshItem(proxies,tile,{signature,append(vertices){
+  const homes=district?coastalTownPlan(region,slot).houses.slice(0,Math.ceil(stage*1.65)):cityGrowthPoints(region,slot,building);
+  for(const home of homes)coastalTownHome(vertices,home,stage,false);
+ }});
+}
+function drawSettlementHousing(view){
+ const detail=atlasEase(Math.max(0,Math.min(1,(view.scale*view.height*.5-6.7)/2)));
+ if(detail<1){
+  gl.uniform1f(loc.parcel,-detail);
+  drawMeshBatch(housingProxyBuffer,view);
+ }
+ if(detail>0){
+  gl.uniform1f(loc.parcel,detail<1?detail:0);
+  drawMeshBatch(housingDetailBuffer,view);
+ }
+ gl.uniform1f(loc.parcel,0);
 }
 function deleteMeshBatch(batch){
  if(batch)for(const chunk of batch.chunks.values())gl.deleteBuffer(chunk.buffer);
@@ -1790,12 +2100,34 @@ function rebuildParcelSurfaces(){
  if(signature===parcelSignature)return;
  refreshUrbanPaint(all);
  parcelSignature=signature;
- const groups=new Map();
- for(const {r,b,slot} of all)addMeshItem(groups,Math.floor(r.id/4),{
-  signature:[r.id,b.slotId,b.type,b.level||1,cityGrowthStage(b)].join(':'),
-  append:vertices=>appendParcelDecor(vertices,r,slot,b)
- });
- parcelDecorBuffer=updateMeshBatch(parcelDecorBuffer,groups);
+ const groups=new Map(),hedges=new Map(),houses=new Map(),proxies=new Map();
+ for(const r of state.regions){
+  if(r.owner!=='neutral')continue;
+  const slot=r.slots[0],town={type:'city',population:800};
+  addSettlementHousing(houses,proxies,r,slot,town,vertices=>appendCityGrowth(vertices,r,slot,town,cityGrowthPoints(r,slot,town)));
+ }
+ for(const {r,b,slot} of all){
+  if(b.type==='city'){
+   addSettlementHousing(houses,proxies,r,slot,b,vertices=>appendParcelDecor(vertices,r,slot,b));
+   continue;
+  }
+  const group=settlementTile(r),parcel=[r.id,b.slotId,b.type,b.level||1].join(':');
+  addMeshItem(groups,group,{
+   signature:parcel+':'+cityGrowthStage(b),
+   append:vertices=>appendParcelDecor(vertices,r,slot,b)
+  });
+  if(b.type==='grain'&&r.id!==pilotLand?.region){
+   const boundary=farmBoundaryKind(b);
+   addMeshItem(boundary==='hedge'?hedges:groups,group,{
+    signature:parcel+':'+boundary,
+    append:vertices=>fieldMargins(vertices,r,slot,b,boundary)
+   });
+  }
+ }
+ housingDetailBuffer=updateMeshBatch(housingDetailBuffer,houses,packStaticModels);
+ housingProxyBuffer=updateMeshBatch(housingProxyBuffer,proxies,packStaticModels);
+ parcelDecorBuffer=updateMeshBatch(parcelDecorBuffer,groups,packStaticModels);
+ farmHedgeBuffer=updateMeshBatch(farmHedgeBuffer,hedges,packForestVertices);
 }
 // A shared sea-side landing marks the port at the exact water waypoint used by ships.
 function scenarioBerth(port,exclude){
@@ -1871,14 +2203,16 @@ function harborCargo(out,x,y,z,size,barrel){
 }
 function portWarehouse(out,x,y,z){
  farmRange(out,x-.75,y,z-1.15,8.5,4.05,3.85,true);
- const wood=[.40,.285,.18];
+ const wood=modelMaterial([.40,.285,.18],'timber');
+ const cloth=[modelMaterial([.78,.70,.53],'cloth'),modelMaterial([.48,.52,.42],'cloth')];
  for(const dx of [-3.85,-.60,2.65]){
   cube(out,x+dx,y-.48,z+2.74,.24,2.72,.24,wood);
   timberBeam(out,[x+dx,y+1.68,z+2.74],[x+dx,y+2.68,z+1.34],.16,wood);
  }
  for(let i=0;i<5;i++){
   const left=x-4.2+i*1.48,right=left+1.48;
-  quad(out,[left,y+2.75,z+.74],[right,y+2.75,z+.74],[right,y+2.28,z+3.15],[left,y+2.28,z+3.15],i%2?[.48,.52,.42]:[.78,.70,.53]);
+  quad(out,[left,y+2.75,z+.74],[right,y+2.75,z+.74],[right,y+2.28,z+3.15],[left,y+2.28,z+3.15],cloth[i%2]);
+  quad(out,[left,y+2.28,z+3.15],[right,y+2.28,z+3.15],[right,y+2.10,z+3.12],[left,y+2.13,z+3.12],tint(cloth[i%2],.84));
  }
  for(let i=0;i<5;i++)harborCargo(out,x-3.05+i*1.16,y,z+1.84+(i%2)*.30,1.12,i<3);
  for(let i=0;i<3;i++)harborCargo(out,x+4.25+(i%2)*1.05,y,z-.55+Math.floor(i/2)*.95,1.08,i===2);
@@ -1948,7 +2282,22 @@ function drawHarborLanding(out,port,f){
  }
  for(let j=1;j<edges.length;j++)quad(out,edges[j-1][0],edges[j-1][1],edges[j][1],edges[j][0],[.54,.46,.33]);
 }
-function addPortLanding(out,port){const frame=harborFrame(port);if(frame){drawHarborLanding(out,port,frame);return}let p=portWaterCell(port);if(!p)return;if(p.river){addRiverPier(out,port,p);return}let y=-.83,wood=[.44,.32,.21],wall=[.70,.64,.49],roofColor=[.44,.29,.23];cube(out,p.x,y,p.z,3.8,.3,2.6,wood);cube(out,p.x-1,y+.3,p.z,1.3,1.2,1.2,wall);cone(out,p.x-1,y+1.5,p.z,1.0,.7,roofColor,4);cube(out,p.x+1.3,y+.3,p.z+.8,.12,1.9,.12,wood);cube(out,p.x+1.3,y+1.9,p.z+.56,.08,.45,.50,FACTION_COLORS[port.faction]||[.80,.70,.48])}
+function addPortLanding(out,port){
+ const frame=harborFrame(port);
+ if(frame){drawHarborLanding(out,port,frame);return}
+ const p=portWaterCell(port);
+ if(!p)return;
+ if(p.river){addRiverPier(out,port,p);return}
+ const y=-.83,wood=modelMaterial([.44,.32,.21],'timber'),wall=modelMaterial([.70,.64,.49],'plaster');
+ for(let i=0;i<11;i++)cube(out,p.x,y,p.z+(i-5)*.24,3.8,.30,.224,tint(wood,i%2?1.12:1));
+ for(const dx of [-1.63,1.63])for(const dz of [-1.03,1.03])cube(out,p.x+dx,y-.39,p.z+dz,.18,.86,.18,wood);
+ cube(out,p.x-1,y+.30,p.z,1.3,1.2,1.2,wall);
+ tiledRoof(out,p.x-1,y+1.5,p.z,1.61,1.48,.61,[.44,.29,.23]);
+ cube(out,p.x-1,y+.30,p.z+.63,.36,.76,.10,wood);
+ harborCargo(out,p.x+.20,y+.30,p.z+.54,.53,true);
+ cube(out,p.x+1.3,y+.3,p.z+.8,.12,1.9,.12,wood);
+ cube(out,p.x+1.3,y+1.9,p.z+.56,.08,.45,.50,FACTION_COLORS[port.faction]||[.80,.70,.48]);
+}
 function addArmoryAnnex(out,region){
  const seat=duchySeat(region);
  if(!seat)return;
@@ -1957,13 +2306,15 @@ function addArmoryAnnex(out,region){
   .find(p=>slotAt(region,p.x,p.z)?.id===seat.slotId);
  if(!site)return;
  const {x,z}=site,y=surfaceHeight(x,z)+.25;
- const stone=[.53,.49,.40],roof=[.28,.26,.24],oak=[.36,.26,.19];
+ const stone=modelMaterial([.53,.49,.40],'stone'),roof=[.28,.26,.24],oak=modelMaterial([.36,.26,.19],'timber');
  cube(out,x,y,z,5.8*s,.36*s,4.0*s,stone);
  cube(out,x,y+.28*s,z,5.4*s,2.55*s,3.6*s,stone);
  tiledRoof(out,x,y+2.8*s,z,5.9*s,4.0*s,1.28*s,roof);
  cube(out,x+1.77*s,y+1.0*s,z+.60*s,.83*s,4.1*s,.86*s,[.47,.34,.27]);
  cube(out,x+1.77*s,y+5.1*s,z+.60*s,1.03*s,.24*s,1.06*s,[.39,.30,.24]);
  cube(out,x-.73*s,y+.36*s,z+1.82*s,.91*s,1.72*s,.11*s,oak);
+ const straps=modelMaterial([.35,.36,.33],'metal');
+ for(const dy of [.66,1.60])cube(out,x-.73*s,y+dy*s,z+1.89*s,.81*s,.09*s,.064*s,straps);
  for(const dx of [-1.9,1.2])cube(out,x+dx*s,y+1.37*s,z+1.83*s,.52*s,.55*s,.12*s,[.24,.18,.12]);
  cube(out,x+2.2*s,y+.27*s,z+2.6*s,1.25*s,.49*s,.70*s,oak);
  cube(out,x+2.2*s,y+.75*s,z+2.6*s,.92*s,.22*s,.47*s,[.39,.41,.40]);
@@ -1972,9 +2323,18 @@ function addRiverPier(out,port,berth){
  const side=(port.x-berth.x)*berth.bankX+(port.z-berth.z)*berth.bankZ>=0?1:-1;
  const nx=berth.bankX*side,nz=berth.bankZ*side;
  const x=berth.x+nx*2.4,z=berth.z+nz*2.4,y=surfaceHeight(x,z)+.38;
- timberBeam(out,[berth.x+nx*.45,y,berth.z+nz*.45],[x+nx*2.3,y,z+nz*2.3],.63,[.47,.33,.21]);
- cube(out,x,y,z,2.1,.30,1.82,[.52,.38,.24]);
- for(const along of [-1,1])cube(out,x-nz*along*.9,y-.57,z+nx*along*.9,.23,.77,.23,[.36,.27,.18]);
+ const oak=modelMaterial([.47,.33,.21],'timber');
+ const point=(along,across,dy)=>[x+nx*along-nz*across,y+dy,z+nz*along+nx*across];
+ for(const side of [-1,1])timberBeam(out,point(-1.95,side*.32,-.18),point(2.3,side*.32,-.18),.18,oak);
+ for(let i=0;i<12;i++){
+  const along=-1.89+i*.36,width=along<.58?.86:.54;
+  timberBeam(out,point(along,-width,.02),point(along,width,.02),.32,tint(oak,[1.16,.94,1.04][i%3]));
+ }
+ for(const along of [-1.68,.38])for(const side of [-1,1]){
+  const [px,py,pz]=point(along,side*.76,-.57);
+  cube(out,px,py,pz,.22,1.02,.22,tint(oak,.82));
+  cube(out,px,py+1.02,pz,.28,.084,.28,oak);
+ }
 }
 function geometryForBuildings(){
  rebuildOlives();updateForestMask();rebuildBuildingShadows();
@@ -1983,14 +2343,13 @@ function geometryForBuildings(){
   const owner=region.owner,garrison=state.garrisons?.[region.id];
   const troops=garrison?.owner===owner?garrison.troops:0;
   const buildings=region.buildings.map(b=>[b.type,b.x,b.z,b.capital,b.level].join(',')).join(':');
-  addMeshItem(groups,Math.floor(region.id/4),{
+  addMeshItem(groups,settlementTile(region),{
    signature:[region.id,owner,troops,buildings,!!region.armory?.ready].join(':'),
    append(vertices){
     if(owner==='neutral'){
      const site=region.slots[0];
      const town={type:'city',x:site.x,z:site.z,scale:Math.min(site.scale,.24),slotId:0,faction:owner,population:800};
      addBuilding(vertices,town);
-     appendCityGrowth(vertices,region,site,town,cityGrowthPoints(region,site,town));
     }else for(const building of region.buildings){
      const model={...building,faction:owner,farmForm:farmFormFor(region,building.slotId)};
      addBuilding(vertices,model);
@@ -2006,7 +2365,7 @@ function geometryForBuildings(){
   append:vertices=>addArmyCamp(vertices,army.location.point,army.troops,army.owner)
  });
  rebuildParcelSurfaces();
- return updateMeshBatch(buildingsBuffer,groups);
+ return updateMeshBatch(buildingsBuffer,groups,packStaticModels);
 }
 // Extend the same relief outside playable borders instead of a flat floor.
 // The sea remains below water level, so the water surface covers the seabed.
@@ -2039,8 +2398,18 @@ function backgroundHeight(x,z){
  if(distance<=0)return -2.3;
  return -2.3+(surfaceHeight(x,z)+2.3)*atlasEase(Math.min(1,distance/11));
 }
+function terrainBounds(vertices,stride){
+ let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+ for(let i=0;i<vertices.length;i+=stride){
+  const x=vertices[i],y=vertices[i+1],z=vertices[i+2];
+  minX=Math.min(minX,x);minY=Math.min(minY,y);minZ=Math.min(minZ,z);
+  maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);maxZ=Math.max(maxZ,z);
+ }
+ return {x:(minX+maxX)/2,y:(minY+maxY)/2,z:(minZ+maxZ)/2,
+  halfX:(maxX-minX)/2,halfY:(maxY-minY)/2,halfZ:(maxZ-minZ)/2};
+}
 function createBasemap(){
- const land=[],sea=[],step=GAME_MAP?18:12;
+ const land=new Map(),sea=[],step=GAME_MAP?18:12,tileCells=16;
  const [x0,z0,x1,z1]=sheetBounds.map((value,i)=>value+(i<2?-step:step));
  quad(sea,[x0,-1,z0],[x1,-1,z0],[x1,-1,z1],[x0,-1,z1],[.12,.23,.27]);
  const columns=Math.ceil((x1-x0)/step),rows=Math.ceil((z1-z0)/step);
@@ -2067,11 +2436,42 @@ function createBasemap(){
    if(!inside&&!edges.some(([a,,b])=>Math.min(a,b)<=x&&Math.max(a,b)>=x-cellX))continue;
    const a=previous[col-1],b=previous[col],c=current[col],d=current[col-1];
    if([a,b,c,d].every(p=>p.point[1]<=-2.3))continue;
-   for(const {point,color} of [a,b,c,a,c,d])vertex(land,...point,color);
+   const tile=Math.floor((row-1)/tileCells)*Math.ceil(columns/tileCells)+Math.floor((col-1)/tileCells);
+   if(!land.has(tile))land.set(tile,[]);
+   for(const {point,color} of [a,b,c,a,c,d])vertex(land.get(tile),...point,color);
   }
   previous=current;
  }
- return {land:makeBuffer(land),sea:makeBuffer(sea)};
+ const vertices=new Float32Array([...land.values()].reduce((sum,tile)=>sum+tile.length,0));
+ const tiles=[];
+ let offset=0;
+ for(const coordinates of land.values()){
+  vertices.set(coordinates,offset);
+  tiles.push({first:offset/6,count:coordinates.length/6,bounds:terrainBounds(coordinates,6)});
+  offset+=coordinates.length;
+ }
+ return {land:makeBuffer(vertices),tiles,sea:makeBuffer(sea)};
+}
+function terrainInView(bounds,view,screenWidth=0,screenHeight=0){
+ const {c,s,tilt,x,z}=view;
+ const dx=bounds.x-x,dz=bounds.z-z;
+ const horiz=Math.abs(c*dx-s*dz),vert=Math.abs((s*dx+c*dz)*tilt-bounds.y);
+ const margin=2; // World-space padding for projected edges and raster rounding.
+ return horiz<=canvas.width/(canvas.height*view.scale)+Math.abs(c)*bounds.halfX+Math.abs(s)*bounds.halfZ+margin+screenWidth&&
+  vert<=view.norm/view.scale+(Math.abs(s)*bounds.halfX+Math.abs(c)*bounds.halfZ)*tilt+bounds.halfY+margin+screenHeight*view.norm;
+}
+function drawBasemapLand(view){
+ let first=0,count=0;
+ for(const tile of basemap.tiles){
+  if(terrainInView(tile.bounds,view)){
+   if(!count)first=tile.first;
+   count+=tile.count;
+  }else if(count){
+   drawBuffer({buffer:basemap.land.buffer,first,count});
+   count=0;
+  }
+ }
+ if(count)drawBuffer({buffer:basemap.land.buffer,first,count});
 }
 
 // Paint shadows in map coordinates, so the actual ground depth and slope never cut them.
@@ -2408,12 +2808,14 @@ function drawBorders(now=0){gl.useProgram(borderProgram);gl.enableVertexAttribAr
   drawBorderBuffer(selectedOutline.border,3.2,[.91,.68,.25]);
   drawBorderBuffer(selectedOutline.border,1.1,[1,.94,.68]);
  }
+ drawSelectedRoute();
  drawSelectedArmyRoutes();
  gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.useProgram(prog);for(const i of [borderLoc.position,borderLoc.direction,borderLoc.side])if(i!==loc.p&&i!==loc.c)gl.disableVertexAttribArray(i);gl.enableVertexAttribArray(loc.p);gl.enableVertexAttribArray(loc.c);
  renderVassalBorders(mapView());
 }
 function resize(){let d=Math.min(2,devicePixelRatio||1),s=cachedScale;if(!(s>0.05&&s<=2))s=1;let w=Math.max(1,Math.floor(canvas.clientWidth*d*s)),h=Math.max(1,Math.floor(canvas.clientHeight*d*s));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);dirtyLabels=true}}
 let cachedMapView=null,atlasTarget=false,atlasProgress=0,atlasPitch=0,atlasClock=null,atlasCenterAtMinimum=null;
+const CAMERA_EDGE_OVERHANG=.30;
 const atlasMotionPreference=window.matchMedia('(prefers-reduced-motion: reduce)');
 function atlasAvailable(){return state.started&&diplomaticAtlas.ready&&!mode&&!councilMapOrder}
 function updateAtlasPresentation(now){
@@ -2459,7 +2861,7 @@ function mapView(){
   const [left,top,right,bottom]=sheetBounds;
   const halfAcross=width/(height*scale),halfDown=norm/(scale*tilt);
   const limit=(position,low,high,half)=>{
-   const inset=Math.min((high-low)/2,half);
+   const inset=Math.min((high-low)/2,half)*(1-CAMERA_EDGE_OVERHANG);
    return Math.max(low+inset,Math.min(high-inset,position));
   };
   cam.x=limit(cam.x,left,right,Math.abs(c)*halfAcross+Math.abs(s)*halfDown);
@@ -2569,11 +2971,6 @@ function duchyMapStats(r){
  const stability=duchyStability(r,cityDefenders.get(r.id)),population=Math.floor(duchyPopulation(r)),tier=stability<=50?'critical':stability<70?'warning':'stable';
  return `<span class="duchy-map-stats ${tier}"><span class="duchy-stability" title="${stabilityHint(r,stability)}">${stability}%</span><span class="duchy-population">${resourceGlyph('population')} ${population.toLocaleString(interfaceLocale)} ${populationArrows(r)}</span></span>`;
 }
-function rebelCrest(owner){
- const emblem=Number(owner.split('-').at(-1))%4;
- const marks=['M3 5h3m12 0h3','M3 14h3m12 0h3','M3 18l2 2 2-2m10 0 2 2 2-2','M3 9h3m12 0h3'];
- return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V4m-4 1v4a4 4 0 0 0 8 0V5"/><path class="crest-mark" d="${marks[emblem]}"/></svg>`;
-}
 // ── Procedural heraldry in the spirit of CK3 dynasty shields. Deterministic
 // per key: shield shape, field division, tinctures and charges.
 const HERALDRY_METALS={gold:'#c9a53f',silver:'#e2decc'};
@@ -2674,7 +3071,8 @@ function syncMapStats(){
   const active=region.owner==='you'&&duchySeat(region)?alertsForCity(region,guards,risk):[];
   if(active.length)alerts.set(region.id,active);
   if(risk?.days!=null||risk?.protectedByArmy)unrest.set(region.id,risk);
-  signature.push(region.id,region.owner,duchyStability(region,guards.get(region.id)),Math.floor(duchyPopulation(region)),(region.populationTrend||0).toFixed(3),
+  const vassal=vassalFor(state,region);
+  signature.push(region.id,region.owner,vassal?.seatId,vassal?.specialization,duchyStability(region,guards.get(region.id)),Math.floor(duchyPopulation(region)),(region.populationTrend||0).toFixed(3),
    risk?.days??(risk?.protectedByArmy?'guard':''),...active.map(a=>a.id));
  }
  cityAlerts=alerts;cityUnrest=unrest;cityDefenders=guards;cityAdvisors=advisors;
@@ -2720,17 +3118,26 @@ let labelsJob=null,labelEls=null,labelMeta=null,labelOverview=null;
 function labelsSignature(){
  let sig='';
  for(const r of state.regions){
-  sig+=r.owner+','+(r.vassalId??'')+','+(realmCapitalId(state,r.owner)===r.id?1:0)+','+(cityAlerts.has(r.id)?1:0)+','+(cityUnrest.has(r.id)?1:0)+','+(cityAdvisors.get(r.id)?1:0)+','+(state.garrisons?.[r.id]?.troops||0)+'|';
+  const vassal=vassalFor(state,r),seat=vassal?.seatId===r.id?vassalSpecialization(vassal):'';
+  sig+=r.owner+','+seat+','+(r.vassalId??'')+','+(realmCapitalId(state,r.owner)===r.id?1:0)+','+(cityAlerts.has(r.id)?1:0)+','+(cityUnrest.has(r.id)?1:0)+','+(cityAdvisors.get(r.id)?1:0)+','+(state.garrisons?.[r.id]?.troops||0)+'|';
  }
  return sig+';'+(state.selected?.id??'')+';'+(campaignStartChoice?.id??'')+';'+(state.started?1:0);
 }
+function vassalSpecializationMarker(region){
+ const house=vassalFor(state,region);
+ if(house?.seatId!==region.id)return '';
+ const kind=vassalSpecialization(house),icon=kind==='military'?'swords':'cart';
+ const label=kind==='military'?'Военный феодал':'Торговый феодал';
+ return `<span class="map-vassal-spec ${kind}" title="${label}" role="img" aria-label="${label}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ui-${icon}"/></svg></span>`;
+}
 function makeSettlementLabel(c,job){
  const {r,pos,frontier,available,advisors,capital,originalOwner}=c;
- const stars=capitalStars(r);
+ const stars=capitalStars(r),specialization=vassalSpecializationMarker(r);
  const el=document.createElement('div'),fortified=state.fortifications?.get(r.id)?.gates.size>0;
  if(job.diplomatic){
   el.className='map-label diplomatic-city'+(c.current?' diplomatic-capital':'')+(r===state.selected?' diplomatic-selected':'');
   el.textContent=r.city;
+  if(specialization)el.insertAdjacentHTML('beforeend',specialization);
   el.style.left=pos.x+'px';el.style.top=pos.y+'px';
   return el;
  }
@@ -2739,11 +3146,9 @@ function makeSettlementLabel(c,job){
  else if(fortified)el.title='Пограничная крепость';
  el.style.left=pos.x+'px';
  el.style.top=pos.y+'px';
- const rebel=state.factions?.[r.owner]?.isRebel,crest=FACTION_COLORS[r.owner]&&r.owner!=='you'?' style="background:'+factionCss(r.owner)+';color:#f2e8ce"':'';
- el.innerHTML='<span class="map-label-line">'+(rebel
-  ?`<span class="map-crest crest-${r.owner} rebel-crest"${crest}>${rebelCrest(r.owner)}</span>`
-  :`<span class="map-crest-heraldry${r.owner==='neutral'?' crest-neutral':''}">${heraldryShield(r.owner+':'+r.id,17)}</span>`)+
-  (job.picking?'':`<span class="map-body"><span class="map-ribbon">${stars}${r.city}</span>${duchyMapStats(r)}${state.garrisons?.[r.id]?.troops?`<span class="garrison-badge"${vassalFor(state,r)?' style="--unit-faction:'+paletteCss(vassalFor(state,r).color)+'"':''}>⚔ ${state.garrisons[r.id].troops}</span>`:''}${recruitMapBadge(r)}</span></span>`);
+ el.innerHTML='<span class="map-label-line">'+
+  `<span class="map-crest-heraldry${r.owner==='neutral'?' crest-neutral':''}">${historicalShield(r,19)}</span>`+
+  (job.picking?'':`<span class="map-body"><span class="map-ribbon">${stars}${r.city}${specialization}</span>${duchyMapStats(r)}${state.garrisons?.[r.id]?.troops?`<span class="garrison-badge"${vassalFor(state,r)?' style="--unit-faction:'+paletteCss(vassalFor(state,r).color)+'"':''}>⚔ ${state.garrisons[r.id].troops}</span>`:''}${recruitMapBadge(r)}</span></span>`);
  if(job.picking){
   const ribbon=document.createElement(available?'button':'span');
   ribbon.className='map-ribbon'+(available?' council-target':'');
@@ -2832,7 +3237,8 @@ function renderLabels(){
   const capital=current||originalOwner!==undefined;
   const frontier=state.started&&r.owner==='neutral'&&adjacentToFaction(state,r,'you');
   const available=picking&&councilMapOrder.targets.has(r.id),advisors=cityAdvisors.get(r.id);
-  const priority=r===state.selected||r.id===campaignStartChoice?.id?7:r.id===state.capitalId||originalOwner==='you'||!picking&&advisors?.length?6:available||capital?5:majorSettlements.has(r.key)?4:r.owner!=='neutral'?3:frontier?2:1;
+  const vassalSeat=vassalFor(state,r)?.seatId===r.id;
+  const priority=r===state.selected||r.id===campaignStartChoice?.id?7:r.id===state.capitalId||originalOwner==='you'||!picking&&(advisors?.length||vassalSeat)?6:available||capital?5:majorSettlements.has(r.key)?4:r.owner!=='neutral'?3:frontier?2:1;
   if(diplomatic){
    if(priority<5&&!(GAME_MAP?majorSettlements.has(r.key):balticAtlasCities.has(r.city)))continue;
   }else if(overview&&priority===1)continue;
@@ -2840,14 +3246,14 @@ function renderLabels(){
   const pos=project(point.x,point.z,surfaceHeight(point.x,point.z)+(overview?5:6.5));
   if(diplomatic&&!diplomaticAtlas.contains(pos.x,pos.y,15))continue;
   if(pos.x<-40||pos.y<-35||pos.x>canvas.clientWidth+40||pos.y>canvas.clientHeight+35)continue;
-  candidates.push({r,pos,frontier,priority,available,advisors,capital,current,originalOwner});
+  candidates.push({r,pos,frontier,priority,available,advisors,capital,current,originalOwner,vassalSeat});
  }
  if(overview)candidates.sort((a,b)=>b.priority-a.priority||a.r.id-b.r.id);
  // Видимые метки с подавлением наложений (без создания DOM).
  const visible=new Map(),occupied=[];
  for(const c of candidates){
   const {r,pos,priority}=c;
-  const width=diplomatic?Math.max(35,r.city.length*8+11):Math.max(54,Math.min(191,r.city.length*8.4+22+(Number(c.originalOwner!==undefined)+Number(relocatedCapital(r)))*20));
+  const width=(diplomatic?Math.max(35,r.city.length*8+11):Math.max(54,Math.min(191,r.city.length*8.4+24+(Number(c.originalOwner!==undefined)+Number(relocatedCapital(r)))*20)))+(c.vassalSeat?17:0);
   const previous=labelEls?.get(r.id),gap=previous&&previous.style.display!=='none'?-3:3;
   const x=diplomatic?pos.x+width*.5:pos.x;
   const height=diplomatic?19:cityUnrest.has(r.id)?64:cityAlerts.has(r.id)?47:35;
@@ -2947,50 +3353,119 @@ function labelStep(budget=6){
  return true;
 }
 let roadBuffer=null,trailBuffer=null,trafficBuffer=null,trafficRebuildAt=0,cartBuffer=null,selectedRouteBuffer=null,selectedRoutePath=null,simClock=0,lastFrame=null;
+const wagonModels=new Map(),wagonInstances=gl.createBuffer();
 function roadGround(x,z){return regionAt(state.regions,x,z)?surfaceHeight(x,z):-1.5}
 let roadMeshGraph=null,roadMeshEdges=0,roadExtensions=[];
-let riverBuffer=null,bridgeBuffer=null;
+let riverBuffer=null,riverBankBuffer=null,bridgeBuffer=null;
+const ESTUARY_BLEND_LENGTH=12;
+function extendEstuary(path){
+ const end=path.at(-1),before=path.at(-2);
+ if(!before||!estuaryWaterAt(end))return path;
+ const heading=Math.atan2(end.z-before.z,end.x-before.x);
+ let best=null,reach=0;
+ for(const offset of [0,.4,-.4,.8,-.8,1.2,-1.2,Math.PI/2,-Math.PI/2,Math.PI]){
+  const dx=Math.cos(heading+offset),dz=Math.sin(heading+offset);
+  for(let length=1;length<=ESTUARY_BLEND_LENGTH;length++){
+   const point={x:end.x+dx*length,z:end.z+dz*length};
+   if(!inRing(point.x,point.z,sheetPoints)||!estuaryWaterAt(point))break;
+   if(length>reach){best=point;reach=length;}
+  }
+  if(reach===ESTUARY_BLEND_LENGTH)break;
+ }
+ return best?[...path,best]:path;
+}
+function waterwayLines(){
+ const lines=riverMap.lines.filter(([,system])=>riverSeaConnection(system));
+ for(const [system,channel] of riverMap.systems.entries()){
+  if(!channel.sea)continue;
+  const main=lines.find(([,id,,points])=>id===system&&points.some(([x,z])=>x===channel.outlet.x&&z===channel.outlet.z));
+  const path=[channel.outlet,...channel.sea].filter((point,i,all)=>!i||distance(point,all[i-1])>.001);
+  if(path.length>1)lines.push([main?.[0]||'',system,main?.[2]??3,extendEstuary(path).map(({x,z})=>[x,z]),true]);
+ }
+ return lines;
+}
+function appendWaterway(water,banks,line,width,estuary,sourceAtStart,sourceAtEnd){
+ const points=[line[0]],along=[0];
+ for(let i=1;i<line.length;i++){
+  const [x,z]=line[i-1],dx=line[i][0]-x,dz=line[i][1]-z,length=Math.hypot(dx,dz);
+  if(length<1e-5)continue;
+  const steps=Math.ceil(length/1.75),start=along.at(-1);
+  for(let j=1;j<=steps;j++){
+   points.push([x+dx*j/steps,z+dz*j/steps]);
+   along.push(start+length*j/steps);
+  }
+ }
+ const wetLength=[];
+ if(estuary){
+  let dry=-Infinity;
+  for(let i=0;i<points.length;i++){
+   const [x,z]=points[i];
+   if(!estuaryWaterAt({x,z}))dry=along[i];
+   wetLength[i]=along[i]-dry;
+  }
+  dry=Infinity;
+  for(let i=points.length-1;i>=0;i--){
+   const [x,z]=points[i];
+   if(!estuaryWaterAt({x,z}))dry=along[i];
+   wetLength[i]=Math.min(wetLength[i],dry-along[i]);
+  }
+ }
+ let previous=null;
+ for(let index=0;index<points.length;index++){
+  const [x,z]=points[index],distanceToEnd=along.at(-1)-along[index];
+  const a=points[Math.max(0,index-1)],b=points[Math.min(points.length-1,index+1)];
+  const dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz)||1;
+  const nx=-dz/length,nz=dx/length;
+  const sourceDistance=Math.min(sourceAtStart?along[index]:Infinity,sourceAtEnd?distanceToEnd:Infinity);
+  const taper=.20+.80*atlasEase(Math.min(1,sourceDistance/6));
+  const half=width*taper*(.91+.05*Math.sin(x*.15+z*.12));
+  const fade=estuary?1-atlasEase(Math.min(1,wetLength[index]/ESTUARY_BLEND_LENGTH)):1;
+  const blend=estuary?atlasEase(Math.min(1,wetLength[index]/(ESTUARY_BLEND_LENGTH*.65))):0;
+  const ground=(px,pz)=>regionAt(state.regions,px,pz)?surfaceHeight(px,pz):backgroundHeight(px,pz);
+  const at=(side,profile,strip)=>{
+   const xx=x+nx*side,zz=z+nz*side,height=ground(xx,zz);
+   const coverage=strip?fade:fade*(1-blend)*Math.max(0,Math.min(1,(height+1.13)/.30));
+   return [xx,Math.max(-1.15,height+.19),zz,[profile,coverage,strip?1+blend:0]];
+  };
+  const lip=Math.min(.32,half*.15);
+  const row={
+   water:[at(-half,-1,1),at(0,0,1),at(half,1,1)],
+   left:[at(-half-lip,1,0),at(-half*.91,0,0)],
+   right:[at(half*.91,0,0),at(half+lip,1,0)]
+  };
+  if(previous){
+   const strip=(out,before,after)=>{
+    for(let j=1;j<after.length;j++)
+     for(const point of [before[j-1],after[j-1],after[j],before[j-1],after[j],before[j]])vertex(out,...point);
+   };
+   strip(water,previous.water,row.water);
+   strip(banks,previous.left,row.left);
+   strip(banks,previous.right,row.right);
+  }
+  previous=row;
+ }
+}
 function rebuildWaterways(){
  if(!riverBuffer){
-  const vertices=[];
-  for(const [,,rank,line] of riverMap.lines){
-   const points=[line[0]];
-   for(let i=1;i<line.length;i++){
-    const [x,z]=line[i-1],dx=line[i][0]-x,dz=line[i][1]-z,steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/2.6));
-    for(let j=1;j<=steps;j++)points.push([x+dx*j/steps,z+dz*j/steps]);
-   }
-   const width=rank<=2?2.8:rank<=4?2.35:rank===5?1.85:1.24;
-   const sections=points.map(([x,z],index)=>{
-    const a=points[Math.max(0,index-1)],b=points[Math.min(points.length-1,index+1)];
-    const dx=b[0]-a[0],dz=b[1]-a[1],length=Math.hypot(dx,dz)||1;
-    return {x,z,nx:-dz/length,nz:dx/length};
-   });
-   const profile=[[-1.14,.12,[.37,.38,.26]],[-.88,.17,[.28,.42,.41]],[0,.19,[.18,.33,.39]],
-    [.88,.17,[.30,.44,.42]],[1.14,.12,[.41,.41,.28]]];
-   const strips=sections.map(({x,z,nx,nz})=>{
-    const half=width*(.95+.08*Math.sin(x*.15+z*.12));
-    return profile.map(([side,lift,color])=>{
-     const xx=x+nx*half*side,zz=z+nz*half*side;
-     const height=regionAt(state.regions,xx,zz)?surfaceHeight(xx,zz):backgroundHeight(xx,zz);
-     return [xx,Math.max(-1,height)+lift,zz,color];
-    });
-   });
-   for(let i=1;i<strips.length;i++){
-    const a=sections[i-1],b=sections[i],mid={x:(a.x+b.x)/2,z:(a.z+b.z)/2};
-    if(!regionAt(state.regions,mid.x,mid.z)&&backgroundHeight(mid.x,mid.z)<-1)continue;
-    const left=strips[i-1],right=strips[i];
-    for(let j=1;j<profile.length;j++){
-     for(const p of [left[j-1],right[j-1],right[j],left[j-1],right[j],left[j]])vertex(vertices,...p);
-    }
-   }
+  const water=[],banks=[],lines=waterwayLines();
+  for(const [,system,rank,line,estuary] of lines){
+   const channel=riverMap.systems[system];
+   const source=point=>{
+    const node=channel.nodes.get(point.join(':'));
+    return !estuary&&node!==channel.outlet&&node?.links.size===1;
+   };
+   appendWaterway(water,banks,line,riverWidth(rank),estuary,source(line[0]),source(line.at(-1)));
   }
-  riverBuffer=makeBuffer(vertices);
+  riverBuffer=makeBuffer(water);
+  riverBankBuffer=makeBuffer(banks);
+  diplomaticAtlas.setRivers(lines);
  }
  if(!riverMap.updateBridges(state.network,point=>!!regionAt(state.regions,point.x,point.z)))return;
  if(bridgeBuffer)gl.deleteBuffer(bridgeBuffer.buffer);
  const vertices=[];
  for(const bridge of riverMap.bridges){
-  const {start,end,ux,uz,half}=bridge,stone=[.53,.47,.37],wood=[.42,.30,.19];
+  const {start,end,ux,uz,half}=bridge;
+  const stone=modelMaterial([.53,.47,.37],'stone'),wood=modelMaterial([.42,.30,.19],'timber');
   const point=(along,side,height)=>{
    const x=bridge.x+ux*along-uz*side,z=bridge.z+uz*along+ux*side;
    return [x,surfaceHeight(x,z)+height,z];
@@ -3005,11 +3480,16 @@ function rebuildWaterways(){
    for(let i=0;i<4;i++){
     const a=-half+i*half*.5,b=a+half*.5;
     timberBeam(vertices,point(a,side,deck+.30),point(b,side,deck+.30),.14,stone);
+    timberBeam(vertices,point(a,side*.75,deck-.13),point(b,side*.75,deck-.13),.21,wood);
    }
    for(const offset of [-half,0,half]){
     const [x,y,z]=point(offset,side,.24);
     cube(vertices,x,y,z,.33,.62,.33,stone);
    }
+  }
+  for(const sign of [-1,1]){
+   const offset=sign*(half-.31);
+   timberBeam(vertices,point(offset,-1.29,.21),point(offset,1.29,.21),.43,stone);
   }
   for(const bank of [start,end])cube(vertices,bank.x,surfaceHeight(bank.x,bank.z)+.18,bank.z,1.05,.29,1.05,stone);
  }
@@ -3143,21 +3623,54 @@ function rebuildRoads(){
  rebuildWaterways();
 }
 
-// Only the selected convoy gets a subtle line; reuse geometry until its path changes.
-function drawSelectedRoute(){let ship=selectedCargo,path=ship?.path;if(!path?.length||!state.economy?.shipments.includes(ship)){if(selectedRouteBuffer)gl.deleteBuffer(selectedRouteBuffer.buffer);selectedRouteBuffer=null;selectedRoutePath=null;return}if(path!==selectedRoutePath){if(selectedRouteBuffer)gl.deleteBuffer(selectedRouteBuffer.buffer);let out=[],along=0;for(let i=1;i<path.length;i++){let a=path[i-1],b=path[i],dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(!len)continue;let nx=-dz/len*.30,nz=dx/len*.30,steps=Math.max(1,Math.ceil(len/5));for(let j=0;j<steps;j++){let t=j/steps,u=(j+1)/steps,x=a.x+dx*t,z=a.z+dz*t,x2=a.x+dx*u,z2=a.z+dz*u,at=along+len*(t+u)/2,atSea=ship.mode==='sea'&&at>=ship.seaStart&&at<=ship.seaEnd,y=atSea?-.65:roadGround(x,z)+1.1,y2=atSea?-.65:roadGround(x2,z2)+1.1;quad(out,[x+nx,y,z+nz],[x2+nx,y2,z2+nz],[x2-nx,y2,z2-nz],[x-nx,y,z-nz],[.94,.74,.34])}along+=len}selectedRouteBuffer=makeBuffer(out);selectedRoutePath=path}drawBuffer(selectedRouteBuffer)}
+function selectedShipmentPath(){
+ const ship=selectedCargo;
+ return ship?.path?.length>1&&state.economy?.shipments.includes(ship)?ship.path:null;
+}
+function drawSelectedRoute(){
+ const ship=selectedCargo,path=selectedShipmentPath();
+ if(path!==selectedRoutePath){
+  if(selectedRouteBuffer)gl.deleteBuffer(selectedRouteBuffer.buffer);
+  selectedRouteBuffer=null;
+  selectedRoutePath=path;
+  if(path){
+   const points=[],sea=ship.mode==='sea';
+   let along=0;
+   const append=(point,distance)=>{
+    const afloat=sea&&distance>=ship.seaStart-1e-5&&distance<=ship.seaEnd+1e-5;
+    points.push([point.x,afloat?waterLevel(point)+.5:roadGround(point.x,point.z)+1.1,point.z]);
+   };
+   append(path[0],0);
+   for(let i=1;i<path.length;i++){
+    const a=path[i-1],b=path[i],length=distance(a,b);
+    const steps=Math.ceil(length/4);
+    for(let j=1;j<steps;j++){
+     const t=j/steps;
+     append({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t},along+length*t);
+    }
+    along+=length;
+    append(b,along);
+   }
+   selectedRouteBuffer=buildRouteRibbon(points);
+  }
+ }
+ drawBorderBuffer(selectedRouteBuffer,3.25,[.19,.14,.065]);
+ drawBorderBuffer(selectedRouteBuffer,1.65,[1,.81,.40]);
+}
 function rebuildTrafficRoads(){let out=[],traffic=state.economy?.roadTraffic,now=state.economy?.seconds||0;if(traffic&&state.network)for(const edge of state.network.edges.values()){let [a,b]=edge,flow=roadTrafficValue(traffic.get(roadEdgeKey(a,b)),now);if(flow<.28)continue;let dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);if(!len)continue;let width=.28+Math.min(.22,flow*.025),nx=-dz/len*width,nz=dx/len*width,strength=Math.min(1,flow/5),col=[.65+.12*strength,.55+.12*strength,.38+.09*strength],steps=Math.max(1,Math.ceil(len/3));for(let j=0;j<steps;j++){let t=j/steps,u=(j+1)/steps,x1=a.x+dx*t,z1=a.z+dz*t,x2=a.x+dx*u,z2=a.z+dz*u;quad(out,[x1+nx,roadGround(x1+nx,z1+nz)+.303,z1+nz],[x2+nx,roadGround(x2+nx,z2+nz)+.303,z2+nz],[x2-nx,roadGround(x2-nx,z2-nz)+.303,z2-nz],[x1-nx,roadGround(x1-nx,z1-nz)+.303,z1-nz],col)}}if(trafficBuffer)gl.deleteBuffer(trafficBuffer.buffer);trafficBuffer=makeBuffer(out);trafficRebuildAt=now+8;if(state.economy)state.economy.trafficDirty=false}
-function wheel(out,x,y,z,r,phase){
- const metal=[.32,.31,.27],wood=[.63,.43,.24];
+const wheelIron=modelMaterial([.32,.31,.27],'metal'),wheelOak=modelMaterial([.63,.43,.24],'timber');
+function wheel(out,x,y,z,r,phase,detailed=true){
  const point=(a,scale)=>[x+Math.cos(a)*r*scale,y+Math.sin(a)*r*scale,z];
- for(let i=0;i<10;i++){
-  const a=i*Math.PI/5+phase,b=a+Math.PI/5;
-  quad(out,point(a,1),point(b,1),point(b,.77),point(a,.77),metal);
+ const sides=detailed?10:6,spokes=detailed?7:3,step=2*Math.PI/sides;
+ for(let i=0;i<sides;i++){
+  const a=i*step+phase,b=a+step;
+  quad(out,point(a,1),point(b,1),point(b,.77),point(a,.77),wheelIron);
  }
- for(let i=0;i<7;i++){
-  const a=i*Math.PI*2/7+phase;
-  quad(out,point(a-.18,.16),point(a-.052,.85),point(a+.052,.85),point(a+.18,.16),wood);
+ for(let i=0;i<spokes;i++){
+  const a=i*Math.PI*2/spokes+phase;
+  quad(out,point(a-.18,.16),point(a-.052,.85),point(a+.052,.85),point(a+.18,.16),wheelOak);
  }
- cube(out,x,y-r*.17,z,r*.32,r*.34,r*.24,wood);
+ if(detailed)cube(out,x,y-r*.17,z,r*.32,r*.34,r*.24,wheelOak);
 }
 
 let selectedWarship=null;
@@ -3173,7 +3686,7 @@ const shipModels=new Map();
 function shipModel(color,war=false,detailed=true,moored=false){
  const key=[color.join(','),war,detailed,moored].join(':');
  if(shipModels.has(key))return shipModels.get(key);
- const out=[],wood=[.42,.28,.17],rail=[.64,.43,.25],cloth=[.86,.78,.59];
+ const out=[],wood=modelMaterial([.42,.28,.17],'timber'),rail=modelMaterial([.64,.43,.25],'timber'),cloth=modelMaterial([.86,.78,.59],'cloth');
  const length=war?3.2:2.35,beam=war?1.05:.81;
  const stations=detailed?[[-1,.06],[-.83,.41],[-.53,.78],[-.21,1],[.22,.99],[.52,.83],[.80,.44],[1,.02]]:
   [[-1,.06],[-.58,.79],[-.05,1],[.48,.81],[1,.02]];
@@ -3194,6 +3707,18 @@ function shipModel(color,war=false,detailed=true,moored=false){
   }
  }
  cube(out,-length*.63,1.12,0,.88,.50,beam*1.3,tint(wood,1.08));
+ if(detailed){
+  timberBeam(out,[-length*.88,1.05,0],[-length*1.11,.43,0],.11,rail);
+  for(const side of [-1,1])for(let i=1;i<stations.length;i++){
+   const [a,aw]=stations[i-1],[b,bw]=stations[i];
+   timberBeam(out,[a*length,sheer(a)+.022,aw*beam*side],
+    [b*length,sheer(b)+.022,bw*beam*side],.048,rail);
+   if(war&&aw>.76){
+    const tx=(a+b)*length*.5,tz=(aw+bw)*beam*.501*side;
+    cube(out,tx,.78,tz,.24,.15,.074,tint(wood,.58));
+   }
+  }
+ }
  if(war)cube(out,-length*.64,1.58,0,.87,.11,beam*1.4,color);
  else if(detailed){
   cube(out,-.68,1.04,-.34,.63,.47,.53,[.62,.47,.29]);
@@ -3268,10 +3793,12 @@ function drawFleet(){
  if(!state.warships?.length) return;
  const vertices=[];
  for(const ship of state.warships){
-  const point=navalPosition(ship,ship.pinned?0:simClock);
+  const {point,heading:targetHeading}=navalVisualPose(ship,simClock);
   if(!inMapViewport(point.x,point.z,4)||!navigableWater(point)) continue;
-  const heading=ship.path?routeHeading(ship.path,Math.min(1,(ship.elapsed+simClock)/ship.duration)):ship.heading||0;
-  ship.heading=heading;
+  const now=performance.now(),turnAmount=1-Math.exp(-Math.min(100,now-(ship.visualAt??now))/115);
+  const previous=ship.visualHeading??targetHeading;
+  const heading=previous+Math.atan2(Math.sin(targetHeading-previous),Math.cos(targetHeading-previous))*turnAmount;
+  ship.visualHeading=heading;ship.visualAt=now;
   const color=FACTION_COLORS[ship.owner]||FACTION_COLORS.you;
   const inland=inlandWater(point),level=waterLevel(point,inland),scale=inland?.46:.88;
   if(ship.path&&!ship.pinned&&!inland&&!riverMap.offshoreAt(point))shipWake(vertices,point.x,point.z,heading,true,(ship.elapsed+simClock)*5);
@@ -3312,7 +3839,7 @@ function renderFleet(){
    $('fleet-layer').appendChild(marker);
    fleetMarkers.set(ship,marker);
   }
-  const point=navalPosition(ship,simClock),screen=project(point.x,point.z,waterLevel(point)+5.65);
+  const {point}=navalVisualPose(ship,simClock),screen=project(point.x,point.z,waterLevel(point)+5.65);
   marker.style.left=screen.x+'px';marker.style.top=screen.y+'px';
   marker.className='fleet-marker'+(ship===selectedWarship?' selected':'')+(ship.firing?' fighting':'')+(ship.owner!=='you'?' enemy':'');
   colorUnitMarker(marker,ship.owner);
@@ -3479,7 +4006,7 @@ function appendPaintedModel(out,mesh,x,y,z,angle){
  }
 }
 const wagonPlanks=[],wagonSacks=[],wagonHorse=[];
-const oakCart=[.49,.33,.20],oakTrim=[.62,.45,.27],chestnut=[.53,.31,.20],horseLeather=[.22,.15,.11];
+const oakCart=modelMaterial([.49,.33,.20],'timber'),oakTrim=modelMaterial([.62,.45,.27],'timber'),chestnut=modelMaterial([.53,.31,.20],'leather'),horseLeather=modelMaterial([.22,.15,.11],'leather');
 cube(wagonPlanks,0,.38,0,1.86,.13,1.05,oakCart);
 for(const side of [-1,1]){
  for(let board=0;board<3;board++)cube(wagonPlanks,0,.49+board*.113,side*.49,1.94,.103,.10,board%2?oakTrim:oakCart);
@@ -3493,96 +4020,190 @@ for(const [x,y,z,shift] of [[-.53,.75,-.24,0],[-.04,.78,.24,.06],[.48,.75,-.21,0
  timberBeam(wagonSacks,[x-.12,y+.126,z-.09],[x+.17,y+.126,z+.06],.026,[.51,.43,.31]);
 }
 paintedOval(wagonHorse,1.55,.83,0,.59,.35,.235,chestnut,8);
-paintedOval(wagonHorse,1.91,1.06,0,.27,.34,.19,[.56,.33,.21],6);
-paintedOval(wagonHorse,2.16,1.25,0,.28,.165,.135,[.56,.34,.23],6);
-paintedOval(wagonHorse,2.34,1.155,0,.14,.105,.11,[.36,.24,.19],6);
-timberBeam(wagonHorse,[1.77,1.12,0],[2.06,1.43,0],.11,[.25,.16,.12]);
-timberBeam(wagonHorse,[1.07,.93,0],[.93,.52,-.055],.067,[.28,.17,.11]);
+paintedOval(wagonHorse,1.91,1.06,0,.27,.34,.19,tint(chestnut,1.06),6);
+paintedOval(wagonHorse,2.16,1.25,0,.28,.165,.135,tint(chestnut,1.09),6);
+paintedOval(wagonHorse,2.34,1.155,0,.14,.105,.11,tint(chestnut,.71),6);
+timberBeam(wagonHorse,[1.77,1.12,0],[2.06,1.43,0],.13,tint(horseLeather,1.12));
+timberBeam(wagonHorse,[1.07,.93,0],[.95,.68,-.04],.088,horseLeather);
+timberBeam(wagonHorse,[.95,.68,-.04],[.88,.48,-.10],.059,horseLeather);
 for(const z of [-.072,.072]){
  timberBeam(wagonHorse,[2.13,1.33,z],[2.15,1.51,z],.042,chestnut);
  timberBeam(wagonHorse,[2.18,1.23,z],[1.78,.88,Math.sign(z)*.20],.022,horseLeather);
+ timberBeam(wagonHorse,[1.85,.76,Math.sign(z)*.20],[1.88,1.20,Math.sign(z)*.16],.046,horseLeather);
+ timberBeam(wagonHorse,[1.08,.57,Math.sign(z)*.32],[1.86,.77,Math.sign(z)*.18],.026,horseLeather);
 }
-function addWagonHorse(parts,phase,stopped,offset=0){
- if(offset)appendPaintedModel(parts,wagonHorse,offset,0,0,0);
- else parts.push(...wagonHorse);
- for(let leg=0;leg<4;leg++){
-  const x=offset+(leg%2?1.87:1.20),z=leg<2?-.16:.16;
-  const stride=stopped?0:Math.sin(phase+(leg===0||leg===3?0:Math.PI))*.125;
-  timberBeam(parts,[x,.68,z],[x+stride,.37,z],.092,chestnut);
-  timberBeam(parts,[x+stride,.37,z],[x+stride*1.32,.083,z],.070,horseLeather);
-  cube(parts,x+stride*1.32,.038,z,.095,.076,.084,horseLeather);
+const wagonCargoColors={grain:[.8,.69,.38],wood:[.48,.34,.23],iron:[.55,.56,.56],cloth:[.68,.44,.47],equipment:[.72,.52,.27]};
+const specialWagonLoads={wood:timberCartLoad,iron:oreCartLoad,cloth:clothCartLoad,grain:wagonSacks};
+function wagonModel(close,ship){
+ const good=ship.good,tiers=ship.amount>0?cargoTiers(ship.amount):0;
+ const column=close?(ship.kind==='petition'?2:ship.kind==='export'||ship.kind==='tradeReturn'?1:0):0;
+ const cargo=close&&['supply','botSupply','industry'].includes(ship.kind)?ship.cargo:null;
+ const amount=cargo?Math.max(...Object.values(cargo)):0;
+ const main=amount>0?['wood','iron','cloth','grain'].find(type=>cargo[type]===amount):null;
+ const key=[close,good,tiers,column,main].join(':');
+ if(wagonModels.has(key))return wagonModels.get(key);
+ const parts=[],packed=[];
+ const color=wagonCargoColors[good]||[.68,.62,.48],liveryBase=[.8,.8,.8];
+ // Each vertex keeps its local animation and each instance supplies its pose and livery.
+ const flush=(kind=0,x=0,y=0)=>{
+  for(let i=0;i<parts.length;i+=6)packed.push(parts[i],parts[i+1],parts[i+2],parts[i+3],parts[i+4],parts[i+5],kind,x,y);
+  parts.length=0;
+ };
+ const rotatingWheel=(x,y,z,r,detailed=close)=>{
+  flush();
+  wheel(parts,x,y,z,r,0,detailed);
+  flush(1,x,y);
+ };
+ const horse=(offset=0)=>{
+  appendPaintedModel(parts,wagonHorse,offset,0,0,0);
+  flush();
+  for(let leg=0;leg<4;leg++){
+   const x=offset+(leg%2?1.87:1.20),z=leg<2?-.16:.16;
+   timberBeam(parts,[x,.68,z],[x,.37,z],.092,chestnut);
+   timberBeam(parts,[x,.37,z],[x,.083,z],.070,horseLeather);
+   cube(parts,x,.038,z,.095,.076,.084,horseLeather);
+   flush(2,leg===0||leg===3?1:-1);
+  }
+ };
+ if(!close){
+  cube(parts,0,.42,0,1.9,.42,1.08,oakCart);
+  if(tiers)cube(parts,-.13,.90,0,1.5,.23+tiers*.16,.90,color);
+  for(const x of [-.58,.57])for(const z of [-.56,.56])rotatingWheel(x,.39,z,.34);
+  cube(parts,1.51,.52,0,1.03,.47,.42,chestnut);
+  timberBeam(parts,[1.76,.74,0],[2.01,1.18,0],.26,chestnut);
+  cube(parts,2.12,1.04,0,.40,.23,.25,tint(chestnut,1.08));
+  for(const x of [1.20,1.85])cube(parts,x,.05,0,.14,.51,.31,horseLeather);
+ }else{
+  cube(parts,-.08,.55,-.56,.31,.26,.045,liveryBase);
+  flush(4);
+  parts.push(...wagonPlanks);
+  if(main&&main!=='grain')parts.push(...specialWagonLoads[main]);
+  else if(tiers){
+   if(good==='grain'||main==='grain')parts.push(...wagonSacks);
+   else cube(parts,-.10,.77,0,1.30,.42,.85,color);
+  }
+  for(let tier=1;tier<tiers;tier++){
+   const height=1.23+(tier-1)*.28;
+   if(good==='wood')millLog(parts,-.15,height,(tier%2?1:-1)*.21,1.43,.13);
+   else if(good==='grain')paintedOval(parts,-.31+(tier%2)*.52,height-.17,0,.27,.104,.21,[.74,.63,.44],6);
+   else cube(parts,-.31+(tier%2)*.52,height,0,.54,.27,.67,color);
+  }
+  for(const x of [-.58,.57])for(const z of [-.61,.61])rotatingWheel(x,.4,z,.36);
+  horse();
+  for(let i=1;i<=column;i++){
+   const x=-i*3.9,trade=column===1;
+   cube(parts,x,.42,0,trade?1.6:1.5,trade?.4:.35,trade?1:.9,[.38,.28,.18]);
+   cube(parts,x,.85,0,trade?1.2:1.1,.65,trade?.8:.75,trade?[.70,.58,.40]:i===1?[.71,.57,.31]:[.59,.55,.44]);
+   for(const dx of (trade?[-.4,.4]:[-.42,.42]))for(const z of (trade?[-.54,.54]:[-.48,.48]))rotatingWheel(x+dx,.35,z,trade?.3:.28);
+   horse(x);
+  }
+  if(column){
+   const trade=column===1;
+   cube(parts,trade?-.3:-.15,trade?1.6:1.3,trade?-.35:-.36,trade?.08:.09,trade?2.2:2,.08,[.33,.24,.14]);
+   flush();
+   cube(parts,trade?-.3:-.15,trade?2.35:2.05,trade?-.06:-.1,.07,trade?.6:.7,.55,liveryBase);
+   flush(4);
+  }
+  if(column===2){
+   cube(parts,-.17,2.13,-.1,.12,.18,.18,[.96,.81,.43]);
+   flush();
+   for(let i=0;i<4;i++){
+    const x=-1.2-(i>>1)*2.7,z=(i%2?1:-1)*1.15;
+    cube(parts,x,.52,z,.32,.74,.27,liveryBase);flush(5,i);
+    cube(parts,x,1.02,z,.27,.27,.27,[.79,.68,.50]);
+    cube(parts,x+.18,.75,z,.08,1.55,.08,[.40,.33,.22]);
+    cube(parts,x,1.18,z,.35,.1,.33,[.55,.56,.50]);
+    flush(3,i);
+   }
+  }
  }
+ flush();
+ const buffer=gl.createBuffer();
+ gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(packed),gl.STATIC_DRAW);
+ const mesh={buffer,count:packed.length/9};
+ wagonModels.set(key,mesh);
+ return mesh;
+}
+function drawWagonInstances(layers){
+ const data=[],draws=[];
+ for(const [models,fade] of layers)for(const [mesh,poses] of models){
+  draws.push({mesh,fade,first:data.length/12,count:poses.length/12});
+  for(const value of poses)data.push(value);
+ }
+ if(!data.length)return;
+ gl.bindBuffer(gl.ARRAY_BUFFER,wagonInstances);
+ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.DYNAMIC_DRAW);
+ gl.disableVertexAttribArray(loc.edge);
+ gl.vertexAttrib1f(loc.edge,0);
+ for(const {mesh,fade,first,count} of draws){
+  gl.uniform1f(loc.parcel,fade);
+  gl.drawArrays(gl.TRIANGLES,0,mesh.count,{mesh:mesh.buffer,instances:wagonInstances,first,count});
+ }
+ gl.uniform1f(loc.parcel,0);
 }
 function drawCarts(){
  if(!state.economy||(!state.economy.shipments.length&&!state._harborUnloading?.size))return;
- const v=[],visible=[];
+ const v=[],visible=[],wagons=new Map(),wideCarts=new Map(),detailedCarts=new Map();
+ const detail=warsawStyle?.smooth(WAGON_DETAIL_ZOOM*.76,WAGON_DETAIL_ZOOM*1.22,mapView().scale)??0;
  if(campaignCargoMode!=='hidden')drawHarborUnloading(v);
  for(const ship of state.economy.shipments){
   if(!campaignCargoVisible(ship))continue;
   const progress=cargoProgress(ship);
   const point=pointOnRoute(ship.path,progress);
   if(!inMapViewport(point.x,point.z,3,145))continue;
-  const strategic=ship===selectedCargo||ship.kind==='petition'||ship.kind==='export'||ship.kind==='botSeaTrade';
-  visible.push({ship,progress,point,strategic});
+  visible.push({ship,progress,point,priority:cargoVisualPriority(ship),
+   gap:(point.x-cam.x)**2+(point.z-cam.z)**2});
  }
- // Merchants and diplomatic columns keep their silhouette in a busy view.
- let localDetail=Math.max(8,32-visible.length);
- for(const {ship,progress,point:p,strategic} of visible){
+ // Keep nearby and selected cargo legible when many trade routes cross the view.
+ const modelLimit=96,detailLimit=visible.length>72?12:24;
+ if(visible.length>detailLimit)visible.sort((a,b)=>b.priority-a.priority||a.gap-b.gap);
+ let details=0;
+ for(const {ship,progress,point:p} of visible.slice(0,modelLimit)){
  const along=routeDistanceAt(ship.path,progress),phase=along/.35;
  const y=roadGround(p.x,p.z)+.34+Math.sin(phase*2)*.055;
  if(!inMapViewport(p.x,p.z,y))continue;
  const angle=routeHeading(ship.path,progress);
- const color={grain:[.8,.69,.38],wood:[.48,.34,.23],iron:[.55,.56,.56],cloth:[.68,.44,.47],equipment:[.72,.52,.27]}[ship.good],parts=[];
  const factionColor=FACTION_COLORS[shipmentOwner(ship)]||FACTION_COLORS.you;
- const close=cam.scale>=WAGON_DETAIL_ZOOM;
- const tiers=cargoTiers(ship.amount||0);
  const atSea=ship.mode==='sea'&&along>=ship.seaStart&&along<=ship.seaEnd;
  if(atSea){
   if(navigableWater(p)){
    const heading=merchantDockHeading(ship,along,angle);
    const inland=inlandWater(p);
-   if(!inland&&!riverMap.offshoreAt(p)&&!ship.supplyBlocked&&along-ship.seaStart>3)shipWake(v,p.x,p.z,heading,false,phase);
-   const detailedShip=ship===selectedCargo||ship.kind==='petition'||cam.scale>=.006&&(strategic||localDetail-- > 0);
+   const detailedShip=ship===selectedCargo||details<detailLimit&&(ship.kind==='petition'||cam.scale>=.006);
+   if(detailedShip)details++;
+   if(detailedShip&&!inland&&!riverMap.offshoreAt(p)&&!ship.supplyBlocked&&along-ship.seaStart>3)shipWake(v,p.x,p.z,heading,false,phase);
    placeShip(v,shipModel(factionColor,false,detailedShip),p.x,waterLevel(p,inland),p.z,heading,inland?.49:1);
   }
   continue;
  }
  // The last water gap is handled by the quay crew. Road wagons stop at the shore.
  if(GAME_MAP&&ship.mode==='sea'&&isSeaBackground(p.x,p.z))continue;
- if(cam.scale>=.006)addActorShadow(p.x+.24,p.z+.24,2.18,1.01);
- if(!close){
-  cube(parts,0,.42,0,1.9,.42,1.08,oakCart);
-  if(ship.amount>0)cube(parts,-.13,.90,0,1.5,.23+tiers*.16,.90,color);
-  cube(parts,1.43,.47,0,1.14,.56,.49,chestnut);
-  cube(parts,2.06,.84,0,.41,.30,.27,[.52,.34,.24]);
+ const inPilot=(warsawStyle?.influence(p.x,p.z)||0)>.03;
+ const closeEnough=inPilot?detail>0:cam.scale>=WAGON_DETAIL_ZOOM;
+ const detailedCart=closeEnough&&(ship===selectedCargo||details<detailLimit);
+ if(detailedCart)details++;
+ if(cam.scale>=.006&&(detailedCart||visible.length<=modelLimit))addActorShadow(p.x+.24,p.z+.24,2.18,1.01);
+ const passes=detailedCart&&inPilot&&detail<1?[[false,wideCarts],[true,detailedCarts]]:[[detailedCart,wagons]];
+ const sway=ship.supplyBlocked?0:Math.sin(phase)*.125,spin=phase%(2*Math.PI);
+ for(const [close,models] of passes){
+  const mesh=wagonModel(close,ship);
+  if(!models.has(mesh))models.set(mesh,[]);
+  models.get(mesh).push(p.x,y,p.z,spin,Math.cos(angle),Math.sin(angle),sway,0,...factionColor,0);
  }
- else{
-  parts.push(...wagonPlanks);
-  cube(parts,-.08,.55,-.56,.31,.26,.045,factionColor);
-  const supplyCargo=(ship.kind==='supply'||ship.kind==='botSupply'||ship.kind==='industry')?ship.cargo:null;
-  const mainCargo=supplyCargo?Math.max(...Object.values(supplyCargo)):0;
-  if(mainCargo>0&&supplyCargo.wood===mainCargo)parts.push(...timberCartLoad);
-  else if(mainCargo>0&&supplyCargo.iron===mainCargo)parts.push(...oreCartLoad);
-  else if(mainCargo>0&&supplyCargo.cloth===mainCargo)parts.push(...clothCartLoad);
-  else if(ship.amount>0){
-   if(ship.good==='grain'||mainCargo>0&&supplyCargo.grain===mainCargo)parts.push(...wagonSacks);
-   else cube(parts,-.10,.77,0,1.30,.42,.85,color);
-  }
-  if(ship.amount>0)for(let tier=1;tier<tiers;tier++){
-   const height=1.23+(tier-1)*.28;
-   if(ship.good==='wood')millLog(parts,-.15,height,(tier%2?1:-1)*.21,1.43,.13);
-   else if(ship.good==='grain')paintedOval(parts,-.31+(tier%2)*.52,height-.17,0,.27,.104,.21,[.74,.63,.44],6);
-   else cube(parts,-.31+(tier%2)*.52,height,0,.54,.27,.67,color);
-  }
-  for(const x of [-.58,.57])for(const z of [-.61,.61])wheel(parts,x,.4,z,.36,phase);
-  addWagonHorse(parts,phase,ship.supplyBlocked);
- if(ship.kind==='export'||ship.kind==='tradeReturn'){const x=-3.9;cube(parts,x,.42,0,1.6,.4,1,[.38,.28,.18]);cube(parts,x,.85,0,1.2,.65,.8,[.70,.58,.40]);for(const dx of [-.4,.4])for(const z of [-.54,.54])wheel(parts,x+dx,.35,z,.3,phase);addWagonHorse(parts,phase,ship.supplyBlocked,x);cube(parts,-.3,1.6,-.35,.08,2.2,.08,[.33,.24,.14]);cube(parts,-.3,2.35,-.06,.07,.6,.58,factionColor)}
- if(ship.kind==='petition'){// A diplomatic column: baggage, standard and armed escort, with no combat effect.
- for(let wagon=1;wagon<=2;wagon++){let x=-wagon*3.9;cube(parts,x,.42,0,1.5,.35,.9,[.38,.28,.18]);cube(parts,x,.85,0,1.1,.65,.75,wagon===1?[.71,.57,.31]:[.59,.55,.44]);for(const dx of [-.42,.42])for(const z of [-.48,.48])wheel(parts,x+dx,.35,z,.28,phase);addWagonHorse(parts,phase,ship.supplyBlocked,x)}
- cube(parts,-.15,1.3,-.36,.09,2.0,.09,[.33,.24,.14]);cube(parts,-.15,2.05,-.1,.07,.7,.55,factionColor);cube(parts,-.17,2.13,-.1,.12,.18,.18,[.96,.81,.43]);
- for(let i=0;i<4;i++){let x=-1.2-(i>>1)*2.7,z=(i%2?1:-1)*1.15,bob=Math.sin(phase+i)*.07;cube(parts,x,.52+bob,z,.32,.74,.27,factionColor);cube(parts,x,1.02+bob,z,.27,.27,.27,[.79,.68,.50]);cube(parts,x+.18,.75+bob,z,.08,1.55,.08,[.40,.33,.22]);cube(parts,x,1.18+bob,z,.35,.1,.33,[.55,.56,.50])}}
- }appendPaintedModel(v,parts,p.x,y,p.z,angle);
- }if(!cartBuffer)cartBuffer={buffer:gl.createBuffer(),count:0};gl.bindBuffer(gl.ARRAY_BUFFER,cartBuffer.buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(v),gl.DYNAMIC_DRAW);cartBuffer.count=v.length/6;drawBuffer(cartBuffer)}
+ }
+ const drawCartMesh=(mesh,buffer)=>{
+  if(!mesh.length)return buffer;
+  buffer??={buffer:gl.createBuffer(),count:0};
+  gl.bindBuffer(gl.ARRAY_BUFFER,buffer.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(mesh),gl.DYNAMIC_DRAW);
+  buffer.count=mesh.length/6;
+  drawBuffer(buffer);
+  return buffer;
+ };
+ cartBuffer=drawCartMesh(v,cartBuffer);
+ drawWagonInstances([[wagons,0],[wideCarts,-detail],[detailedCarts,detail]]);
+}
 let marchBuffer=null,selectedArmy=null,selectedGroup=[],selectedCargoGroup=[];const marchElements=new Map();
 const armyRouteBuffers=new Map();
 function buildArmyRouteRibbon(unit){
@@ -3598,6 +4219,9 @@ function buildArmyRouteRibbon(unit){
  };
  const points=[lift(head,head.y,travelled),...path.slice(first).map((point,index)=>
   lift(point,unit._heights[first+index],lengths[first+index]))];
+ return buildRouteRibbon(points);
+}
+function buildRouteRibbon(points){
  const vertices=[];
  const push=(point,direction,side)=>vertices.push(...point,...direction,side);
  let previous=null;
@@ -3640,9 +4264,18 @@ function infantryModel(livery,detail){
  if(!models){models=[];infantryModels.set(livery,models)}
  if(models[detail])return models[detail];
  const mesh=[];
- const steel=[.68,.75,.78],leather=[.24,.17,.13],skin=[.72,.54,.38];
- const coat=tint(livery,.96);
- cube(mesh,0,.24,0,.31,.45,.29,coat);
+ const steel=modelMaterial([.68,.75,.78],'metal'),leather=modelMaterial([.24,.17,.13],'leather'),skin=modelMaterial([.72,.54,.38],'leather');
+ const coat=modelMaterial(tint(livery,.96),'cloth');
+ if(detail===2){
+  const corners=(y,depth,width)=>[[-depth,y,-width],[depth,y,-width],[depth,y,width],[-depth,y,width]];
+  const hem=corners(.24,.127,.143),waist=corners(.36,.105,.102),shoulders=corners(.64,.124,.156);
+  for(let i=0;i<4;i++){
+   const j=(i+1)%4,shade=[.91,1.08,1,.85][i];
+   quad(mesh,hem[i],hem[j],waist[j],waist[i],tint(coat,shade*.92));
+   quad(mesh,waist[i],waist[j],shoulders[j],shoulders[i],tint(coat,shade));
+  }
+  quad(mesh,...shoulders,tint(coat,1.11));
+ }else cube(mesh,0,.24,0,.31,.45,.29,coat);
  if(!detail){
   cube(mesh,.015,.69,0,.24,.20,.25,steel);
   cube(mesh,.18,.38,.096,.045,.29,.17,[.80,.59,.26]);
@@ -3656,6 +4289,7 @@ function infantryModel(livery,detail){
    if(detail===2){
     cube(mesh,.068,.020,side*.071,.148,.059,.109,[.31,.22,.15]);
     timberBeam(mesh,[-.01,.58,side*.137],[.137,.425,side*.164],.086,tint(coat,.89));
+    paintedOval(mesh,-.018,.584,side*.143,.10,.069,.064,tint(steel,.86),5);
    }
   }
   const cx=.168,cy=.488,cz=.10;
@@ -3668,7 +4302,7 @@ function infantryModel(livery,detail){
    quad(mesh,from,to,innerB,innerA,[.39,.27,.14]);
    tri(mesh,innerA,innerB,boss,tint([.86,.61,.28],i<2?1.06:.89));
   }
-  if(detail===2)cube(mesh,cx+.034,cy-.028,cz,.041,.057,.058,[.68,.67,.54]);
+  if(detail===2)paintedOval(mesh,cx+.04,cy-.022,cz,.032,.043,.042,tint(steel,.92),6);
  }
  models[detail]=mesh;
  return mesh;
@@ -3931,7 +4565,7 @@ function renderArmySelection(byKey){
   icon.className='army-selection-icon';icon.setAttribute('aria-hidden','true');
   if(item.general)icon.innerHTML=generalArmySwords;
   else icon.textContent=item.icon;
-  name.textContent=item.label;count.textContent=toNumber(item.troops);
+  name.textContent=item.key.commanderName?item.key.commanderName+' · '+item.label:item.label;count.textContent=toNumber(item.troops);
   button.append(icon,name,count);button.onclick=()=>{
    const point=marchElements.get(item.key)?.armyItem.point;
    if(point){cam.x=point.x;cam.z=point.z;dirtyLabels=true}
@@ -4038,20 +4672,21 @@ function renderMarches(){
   colorUnitMarker(element,item.owner,item.house);
   if(diplomatic&&general){
    const crest=element.querySelector('.atlas-army-crest'),capital=realmCapitalId(state,item.owner);
-   const heraldry=item.owner+':'+capital;
+   const land=state.regions.find(region=>region.id===capital);
+   const heraldry=land?.key||item.owner;
    if(crest.dataset.heraldry!==heraldry){
-    crest.dataset.heraldry=heraldry;crest.innerHTML=heraldryShield(heraldry,18);
+    crest.dataset.heraldry=heraldry;crest.innerHTML=historicalShield(land,18);
    }
   }
   const headcount=element.querySelector('b');
-  const name=item.house?'Феодал':key.generalSlot?generalName(key.generalSlot):item.icon;
+  const name=item.house?vassalDisplayName(state,item.house):key.generalSlot?generalName(key.generalSlot,item.owner):item.icon;
   if(!general){
    const commander=element.querySelector('small');
    if(commander.textContent!==name)commander.textContent=name;
   }
   if(headcount.textContent!==count)headcount.textContent=count;
   const bridge=!item.moving&&riverMap.bridgeAt(point);
-  const title=name+(bridge?' · Мост через '+bridge.river+' · −25% потерь':'')+' · '+(key.inBattle?'Идёт бой':item.label)+' · '+item.troops+' солдат'+(item.house?' · '+vassalDisplayName(state,item.house)+(key.vassalOrder?' · '+key.vassalOrder:''):item.owner==='you'?' · нажмите, чтобы выбрать':'');
+  const title=name+(bridge?' · Мост через '+bridge.river+' · −25% потерь':'')+' · '+(key.inBattle?'Идёт бой':item.label)+' · '+item.troops+' солдат'+(item.house?(key.vassalOrder?' · '+key.vassalOrder:''):item.owner==='you'?' · нажмите, чтобы выбрать':'');
   if(element.title!==title){element.title=title;element.setAttribute('aria-label',title)}
   element.style.left=screen.x+'px';element.style.top=screen.y+'px';
   if(stem){
@@ -4136,12 +4771,12 @@ function updateBuildingDetails(){let view=$('building-detail');if(!selectedBuild
  const load=producerLoads.get(b);
  $('building-output').textContent+=' · В графстве '+Math.max(0,b.produced||0).toFixed(1)+(load?' · Последний груз '+load.amount:'');
 }
-const launch=$('commission-warship');
- launch.hidden=b.type!=='port';
+const launch=$('commission-warship'),warshipCost=landDevelopmentPrice(state,WARSHIP_COST.gold,region);
+ launch.hidden=b.type!=='port'||!canDevelopLand(state,region);
  if(b.type==='port'){
   const built=state.warships?.find(ship=>ship.owner==='you'&&ship.homeId===region.id);
-  launch.textContent=built?'ВЫБРАТЬ КОРАБЛЬ':'ПОСТРОИТЬ КОРАБЛЬ · 90 ЗЛ. · 20 ДЕР. · 8 ЖЕЛ.';
-  launch.disabled=!built&&(state.gold<WARSHIP_COST.gold||state.economy.stocks.wood<WARSHIP_COST.wood||state.economy.stocks.iron<WARSHIP_COST.iron||!portWaterCell(b));
+  launch.textContent=built?'ВЫБРАТЬ КОРАБЛЬ':'ПОСТРОИТЬ КОРАБЛЬ · '+warshipCost+' ЗЛ. · 20 ДЕР. · 8 ЖЕЛ.';
+  launch.disabled=!built&&(state.gold<warshipCost||state.economy.stocks.wood<WARSHIP_COST.wood||state.economy.stocks.iron<WARSHIP_COST.iron||!portWaterCell(b));
  }
  const lane=b.route?.seaSupply;
  if(lane){
@@ -4156,17 +4791,17 @@ const launch=$('commission-warship');
   }
   $('building-output').textContent+=' · снабжение: '+usingPort+' постр.';
  }
- const remove=$('building-demolish');remove.hidden=b===duchySeat(region)||!!b.capital;
- let q=upgradeCheck(state,region,b),button=$('building-upgrade');button.disabled=!q.ok;button.textContent=q.ok?'УЛУЧШИТЬ · '+q.cost+' ЗЛ.':q.cost?q.reason+' · '+q.cost+' ЗЛ.':q.reason;button.title=q.reason||'';$('building-note').textContent=q.nextHousing?'Жильё '+cityHousing(b)+' → '+q.nextHousing+' · рабочих мест '+buildingJobs(b)+' → '+q.nextJobs+' · довольство +2 к цели'+(b.capital?' · караваны '+level+' → '+(level+1):''):q.nextRate?'Рабочие места: '+buildingJobs(b)+' → '+buildingJobs({...b,level:level+1})+' · до '+q.nextRate+' ед./мин при полном штате и контроле':(b.type==='port'?(portWaterCell(b)?.river?'Речной порт · '+portWaterCell(b).river+'. ':'')+'Портов соперников в мире: '+state.regions.filter(r=>state.factions?.[r.owner]&&!isAtWar(state,'you',r.owner)&&r.buildings.some(b=>b.type==='port')).length+'. Стоимость порта: '+TYPES.port.cost+' зл. Рейсы и выручка учитываются после доставки; цена морем выше на 50% до надбавки за расстояние. Путь и спрос нужны; местные купцы покупают груз, государство получает пошлину 15%. Караван выходит из столицы, затем грузит корабль.':b.product||b.type==='city'?'Постройка полностью улучшена':'Улучшение этого типа появится позже');
+ const remove=$('building-demolish');remove.hidden=b===duchySeat(region)||!!b.capital||!canDevelopLand(state,region);
+ let q=upgradeCheck(state,region,b),button=$('building-upgrade');button.disabled=!q.ok;button.textContent=q.ok?'УЛУЧШИТЬ · '+q.cost+' ЗЛ.':q.cost?q.reason+' · '+q.cost+' ЗЛ.':q.reason;button.title=q.reason||'';$('building-note').textContent=q.nextHousing?'Жильё '+cityHousing(b)+' → '+q.nextHousing+' · рабочих мест '+buildingJobs(b)+' → '+q.nextJobs+' · довольство +2 к цели'+(b.capital?' · караваны '+level+' → '+(level+1):''):q.nextRate?'Рабочие места: '+buildingJobs(b)+' → '+buildingJobs({...b,level:level+1})+' · до '+q.nextRate+' ед./мин при полном штате и контроле':(b.type==='port'?(portWaterCell(b)?.river?'Речной порт · '+portWaterCell(b).river+'. ':'')+'Портов соперников в мире: '+state.regions.filter(r=>state.factions?.[r.owner]&&!isAtWar(state,'you',r.owner)&&r.buildings.some(b=>b.type==='port')).length+'. Стоимость порта: '+landDevelopmentPrice(state,TYPES.port.cost,region)+' зл. Рейсы и выручка учитываются после доставки; цена морем выше на 50% до надбавки за расстояние. Путь и спрос нужны; местные купцы покупают груз, государство получает пошлину 15%. Караван выходит из столицы, затем грузит корабль.':b.product||b.type==='city'?'Постройка полностью улучшена':'Улучшение этого типа появится позже');
  if(q.reason&&q.cost)button.title=q.reason+' · '+$('building-note').textContent;
- if(b.type==='city')$('building-output').textContent+=' · услуги '+(job?.workers||0)+' / '+buildingJobs(b)+' рабочих мест · развитие +'+(1+2*(level-1))+(b.capital?' · сухопутные караваны '+level:'');
+ if(b.type==='city')$('building-output').textContent+=' · городской урожай кормит до '+CITY_SELF_FEED_LIMIT+' жителей · услуги '+(job?.workers||0)+' / '+buildingJobs(b)+' рабочих мест · развитие +'+(1+2*(level-1))+(b.capital?' · сухопутные караваны '+level:'');
  for(const id of ['building-output','building-note','building-workforce'])setGameStatText($(id),$(id).textContent);
  useActionTitles([
   ['building-upgrade','Улучшение постройки',$('building-note').textContent],
   ['building-demolish','Снос постройки','Место освободится для новой постройки.'],
   ['commission-warship','Военный корабль',launch.disabled?
-   (costShortfalls(state.gold,state.economy.stocks,WARSHIP_COST.gold,{wood:WARSHIP_COST.wood,iron:WARSHIP_COST.iron}).join(' · ')||'Нужен причал, доступный с воды.'):
-   'Цена · 90 зл., 20 древесины, 8 железа.']]);
+   (costShortfalls(state.gold,state.economy.stocks,warshipCost,{wood:WARSHIP_COST.wood,iron:WARSHIP_COST.iron}).join(' · ')||'Нужен причал, доступный с воды.'):
+   'Цена · '+warshipCost+' зл., 20 древесины, 8 железа.']]);
 }
 $('building-demolish').onclick=()=>{
  if(!selectedBuilding)return;
@@ -4211,6 +4846,10 @@ function cargoDescription(ship){let realm=shipmentOwner(ship),capital=state.regi
   origin=state.regions.find(r=>r.id===ship.targetId)?.city||'поворот на маршруте';
   destination=state.regions.find(r=>r.id===(ship.returnCapitalId??ship.originRegionId))?.city||home;
  }else if(ship.kind==='petition'){label=ship.mode==='sea'?'Морское посольство':'Обоз поселенцев';origin=state.regions.find(r=>r.id===ship.originRegionId)?.city||(ship.owner==='you'?home:regionCity(owner));destination=state.regions.find(r=>r.id===ship.targetId)?.city||'герцогство'}else if(ship.kind==='tradeReturn'){label='Торговец возвращается';origin='рынок';destination=tradeHome}else if(ship.kind==='returnTrade'){label='Возврат груза';origin='прерванный маршрут';destination=tradeHome}else if(ship.kind==='loot'){label='Захваченная добыча';origin='место перехвата';destination=ship.owner==='you'?home:regionCity(owner)}else if(ship.kind==='botSeaTrade'){label=ship.mode==='sea'?'Морской купец':'Купеческий караван';origin=regionCity(owner);destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':ship.buyer==='you'?home:regionCity(buyer)}else if(ship.kind==='export'){label=ship.mode==='sea'?'Морской торговый караван':'Торговый караван · Продажа';origin=tradeHome;destination=ship.mode==='sea'?(state.regions.find(r=>r.id===ship.destinationPortRegionId)?.city||'порт')+' · порт':state.regions.find(r=>r.id===(ship.destinationRegionId??realmCapitalId(state,ship.buyer)))?.city||regionCity(buyer)}else if(ship.kind==='import'){label=ship.domesticPurchase?'Закупка феодала · '+ship.value+' зл.':'Покупка';origin=state.regions.find(r=>r.id===ship.sourceTradeRegionId)?.city||regionCity(seller);destination=state.regions.find(r=>r.id===ship.departureRegionId)?.city||home}else if(ship.kind==='botSupply'){label=ship.seaSupply?'Морское снабжение соперника':'Сборный обоз соперника';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=regionCity(owner)}else{const market=tradeCenter(state,ship.supplyMarketId);label=market?'Поставка на торговый склад':ship.marketTransfer!=null?'Запасы в столицу':ship.seaSupply?'Морское снабжение':'Сборная поставка в столицу';origin=state.regions.find(r=>r.id===ship.originRegion)?.city||'герцогство';destination=market?.city||home}let left=Math.max(0,Math.ceil(ship.duration-ship.elapsed-simClock));let factionId=shipmentOwner(ship),whose=factionId==='you'?(ship.seaSupply?'Ваш груз':'Ваш обоз'):'Обоз: '+regionCity(state.factions?.[factionId]);return whose+' · '+label+' · '+(ship.kind==='tradeReturn'?'без груза':(ship.cargo?Object.entries(ship.cargo).map(([g,n])=>GOODS_LABELS[g]+' '+n).join(', '):GOODS_LABELS[ship.good]+' '+ship.amount)+' ед.')+' · '+origin+' → '+destination+(ship.kind==='export'?' · путь '+Math.round(ship.tradeDistance||routeLength(ship.path))+(ship.mode==='sea'?' ед.':' / '+Math.round(ship.tradeRange||tradeRange(state))+' ед.')+' · выручка '+ship.value.toFixed(1)+' зл. после доставки · пошлина страны покупателя '+(ship.value*.15).toFixed(1)+' зл.':'')+(ship.seaSupply?' · через '+state.regions.find(r=>r.id===ship.seaSupply.departureId)?.city+' и '+state.regions.find(r=>r.id===ship.seaSupply.arrivalId)?.city:'')+(ship.kind==='petitionReturn'?' · возвращает '+ship.fee+' зл.':'')+(ship.supplyBlocked?' · пункт назначения недоступен':(ship.routeRisk?' · риск перехвата':ship.warDetour?' · маршрут в обход':'')+' · '+left+' сек.')}
+function cargoVisualPriority(ship){
+ return ship===selectedCargo?4:selectedCargoGroup.includes(ship)?3:
+  ['export','petition','petitionReturn','loot','botSeaTrade'].includes(ship.kind)?2:shipmentOwner(ship)==='you'?1:0;
+}
 function visibleCargoBadges(){
  const visible=[];
  const limit=cam.scale<.005?26:48;
@@ -4221,9 +4860,7 @@ function visibleCargoBadges(){
   if(!inMapViewport(p.x,p.z,3,160))continue;
   const screen=project(p.x,p.z,roadGround(p.x,p.z)+4);
   if(screen.x<-30||screen.y<-30||screen.x>canvas.clientWidth+30||screen.y>canvas.clientHeight+30)continue;
-  const priority=ship===selectedCargo||selectedCargoGroup.includes(ship)?3:
-   ['export','petition','petitionReturn','loot','botSeaTrade'].includes(ship.kind)?2:shipmentOwner(ship)==='you'?1:0;
-  visible.push({ship,screen,priority});
+  visible.push({ship,screen,priority:cargoVisualPriority(ship)});
  }
  visible.sort((a,b)=>b.priority-a.priority);
  // Preserve a distinct marker at busy intersections. A selection always takes priority.
@@ -4602,10 +5239,14 @@ function paintDiplomaticMap(view){
   app.style.setProperty('--atlas-label-opacity',String(labels));
   app.style.setProperty('--atlas-detail-opacity',String(1-opacity));
  }
- if(!opacity)return;
+ if(!opacity){
+  if(view.atlas&&view.baseScale<ATLAS_TILT_START*1.25)
+   diplomaticAtlas.prepareSurface(state.regions,atlasBorderEdges,FACTION_COLORS,preferences.trees);
+  return;
+ }
  const selection=selectedArmy?[selectedArmy]:selectedGroup;
  const routes=selection.map(item=>item.unit).filter(unit=>unit?.path?.length>1&&state.armyMoves.includes(unit)).map(unit=>unit.path);
- diplomaticAtlas.render(view,state.regions,atlasBorderEdges,FACTION_COLORS,state.selected,routes,preferences.trees);
+ diplomaticAtlas.render(view,state.regions,atlasBorderEdges,FACTION_COLORS,state.selected,routes,preferences.trees,selectedShipmentPath());
 }
 function drawDiplomaticMarkers(now){
  if(dirtyLabels)renderLabels();
@@ -4615,43 +5256,68 @@ function drawDiplomaticMarkers(now){
  for(const [el,data] of mapFeedback)positionMapFeedback(el,data);
 }
 function draw(now=0){
+ if(gl.stopped)return;
+ requestAnimationFrame(draw);
  if(preferences.fpsLimit){
-  if(now+.5<nextFrameAt){requestAnimationFrame(draw);return;}
+  if(now+.5<nextFrameAt)return;
   const interval=1000/preferences.fpsLimit;
   nextFrameAt=!nextFrameAt||now-nextFrameAt>=interval?now+interval:nextFrameAt+interval;
  }
- fpsFrames++;const fpsNow=performance.now();if(fpsNow-fpsSampleAt>=500){const fps=Math.round(fpsFrames*1000/(fpsNow-fpsSampleAt||1));fpsFrames=0;fpsSampleAt=fpsNow;if(fpsMeter){fpsMeter.textContent=fps+' FPS';fpsMeter.dataset.rate=fps<30?'low':fps<55?'mid':'ok';fpsMeter.hidden=!preferences.fpsCounter}fpsWatchdog(fps)}
- if(globalThis.gameShell?.paused){lastFrame=now;requestAnimationFrame(draw);return}
- if(recapPlayback){drawCampaignReplay(now);requestAnimationFrame(draw);return}
+ if(globalThis.gameShell?.paused){lastFrame=now;return}
+ const fpsNow=performance.now();if(fpsNow-fpsSampleAt>=500){const fps=Math.round(fpsFrames*1000/(fpsNow-fpsSampleAt||1));fpsFrames=0;fpsSampleAt=fpsNow;if(fpsMeter){fpsMeter.textContent=fps+' FPS';fpsMeter.dataset.rate=fps<30?'low':fps<55?'mid':'ok';fpsMeter.hidden=!preferences.fpsCounter}fpsWatchdog(fps)}
+ if(recapPlayback){drawCampaignReplay(now);fpsFrames++;return}
  runVisualJobs();
- if(gl.stopped===true)return;resize();if(lastFrame!==null&&!document.hidden)updateCamera(Math.max(0,Math.min(.05,(now-lastFrame)/1000)));if(lastFrame!==null&&!document.hidden&&!warAlerts.length&&state.started&&globalThis.gameShell?.playing!==false&&!(state.campaign?.result&&!state.campaign.exploring)){simClock+=Math.max(0,Math.min(.25,(now-lastFrame)/1000));while(simClock>=1){const t0=performance.now();stepEconomy(state,1);const t1=performance.now();rebuildParcelSurfaces();const t2=performance.now();if(state.economy.roadTraffic?.size&&state.economy.seconds>=trafficRebuildAt)rebuildTrafficRoads();const t3=performance.now();drainEconomyEffects();const t4=performance.now();simClock-=1;updateUI();const t5=performance.now();simTimings.economy=t1-t0;simTimings.surfaces=t2-t1;simTimings.traffic=t3-t2;simTimings.effects=t4-t3;simTimings.ui=t5-t4;simTimings.count++;if(t1-t0>simTimings.worstEconomy)simTimings.worstEconomy=t1-t0;if(t2-t1>simTimings.worstSurfaces)simTimings.worstSurfaces=t2-t1;if(t3-t2>simTimings.worstTraffic)simTimings.worstTraffic=t3-t2;if(t4-t3>simTimings.worstEffects)simTimings.worstEffects=t4-t3;if(t5-t4>simTimings.worstUi)simTimings.worstUi=t5-t4}}lastFrame=now;if(!document.hidden&&!warAlerts.length&&globalThis.gameShell?.playing!==false)runQueuedBotActions();
- prepareAtlasWoods();updateAtlasPresentation(now);
- const view=mapView();paintDiplomaticMap(view);
- if(view.opacity===1){drawDiplomaticMarkers(now);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw);return}
+ resize();if(lastFrame!==null&&!document.hidden)updateCamera(Math.max(0,Math.min(.05,(now-lastFrame)/1000)));if(lastFrame!==null&&!document.hidden&&!warAlerts.length&&state.started&&globalThis.gameShell?.playing!==false&&!(state.campaign?.result&&!state.campaign.exploring)){simClock+=Math.max(0,Math.min(.25,(now-lastFrame)/1000));while(simClock>=1){const t0=performance.now();stepEconomy(state,1);const t1=performance.now();rebuildParcelSurfaces();const t2=performance.now();if(state.economy.roadTraffic?.size&&state.economy.seconds>=trafficRebuildAt)rebuildTrafficRoads();const t3=performance.now();drainEconomyEffects();const t4=performance.now();simClock-=1;updateUI();const t5=performance.now();simTimings.economy=t1-t0;simTimings.surfaces=t2-t1;simTimings.traffic=t3-t2;simTimings.effects=t4-t3;simTimings.ui=t5-t4;simTimings.count++;if(t1-t0>simTimings.worstEconomy)simTimings.worstEconomy=t1-t0;if(t2-t1>simTimings.worstSurfaces)simTimings.worstSurfaces=t2-t1;if(t3-t2>simTimings.worstTraffic)simTimings.worstTraffic=t3-t2;if(t4-t3>simTimings.worstEffects)simTimings.worstEffects=t4-t3;if(t5-t4>simTimings.worstUi)simTimings.worstUi=t5-t4}}lastFrame=now;if(!document.hidden&&!warAlerts.length&&globalThis.gameShell?.playing!==false)runQueuedBotActions();
+ if(now<retryRenderAt)return;
+ try{
+  prepareAtlasWoods();updateAtlasPresentation(now);
+  const view=mapView();paintDiplomaticMap(view);
+  if(view.opacity===1)drawDiplomaticMarkers(now);
+  else{
+   if(!gl.canPresent())return;
+   drawWorldFrame(now,view);
+  }
+  globalThis.gameShell?.frame(gl,state.started);
+  fpsFrames++;
+  renderFailures=0;
+ }catch(error){
+  gl.discardFrame();
+  gl.enable(gl.DEPTH_TEST);
+  gl.useProgram(prog);
+  for(const slot of [loc.roadDetail,loc.modelDetail,loc.parcel,loc.captureStrength])gl.uniform1f(slot,0);
+  if(renderFailures++===0)console.error('Campaign map frame',error);
+  retryRenderAt=now+Math.min(1000,60*renderFailures);
+ }
+}
+let retryRenderAt=0,renderFailures=0;
+function drawWorldFrame(now,view){
  const rs=performance.now();gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.uniform2f(loc.center,cam.x,cam.z);gl.uniform2f(loc.size,canvas.width,canvas.height);gl.uniform1f(loc.scale,mapView().scale);cameraUniforms(loc);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,groundAsset.texture);gl.activeTexture(gl.TEXTURE0+1);gl.bindTexture(gl.TEXTURE_2D,waterAsset.texture);gl.uniform1i(loc.ground,0);gl.uniform1i(loc.waterMap,1);
  gl.activeTexture(gl.TEXTURE0+12);gl.bindTexture(gl.TEXTURE_2D,paintedMaterials.texture);
  gl.activeTexture(gl.TEXTURE0+14);gl.bindTexture(gl.TEXTURE_2D,habitatAsset.texture);
  gl.activeTexture(gl.TEXTURE0+13);gl.bindTexture(gl.TEXTURE_2D,parcelAnchorTexture);
  gl.activeTexture(gl.TEXTURE0+15);gl.bindTexture(gl.TEXTURE_2D,canopyShadowTexture);
  gl.activeTexture(gl.TEXTURE0+16);gl.bindTexture(gl.TEXTURE_2D,meadowBrushAsset.texture);
+ gl.activeTexture(gl.TEXTURE0+17);gl.bindTexture(gl.TEXTURE_2D,modelMaterialsAsset.texture);
  gl.uniform1f(loc.andalusiaReady,andalusiaAsset?.ready?1:0);
  gl.activeTexture(gl.TEXTURE0+2);gl.bindTexture(gl.TEXTURE_2D,closeGroundAsset.texture);
  if(urbanPaint){gl.activeTexture(gl.TEXTURE0+11);gl.bindTexture(gl.TEXTURE_2D,urbanPaint.texture)}
  if(andalusiaAsset){gl.activeTexture(gl.TEXTURE0+3);gl.bindTexture(gl.TEXTURE_2D,andalusiaAsset.texture)}
  gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,materialsAsset.texture);gl.uniform1i(loc.materialMap,4);gl.uniform1f(loc.materialsReady,materialsAsset.ready?(closeGroundAsset.ready?(paintedMaterials.ready&&habitatAsset.ready&&meadowBrushAsset.ready?3:2):1):0);
  gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(ATLAS_TILT_START-cam.scale)/(ATLAS_TILT_START-ATLAS_ENTER_ZOOM))),hasStencil=gl.getContextAttributes?.()?.stencil!==false;
- if(hasStencil){gl.clearStencil(0);gl.stencilMask(255);gl.clear(gl.STENCIL_BUFFER_BIT);gl.enable(gl.STENCIL_TEST);gl.stencilFunc(gl.ALWAYS,1,255);gl.stencilOp(gl.KEEP,gl.KEEP,gl.REPLACE)}else{drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1)}
+ if(hasStencil){gl.clearStencil(0);gl.stencilMask(255);gl.clear(gl.STENCIL_BUFFER_BIT);gl.enable(gl.STENCIL_TEST);gl.stencilFunc(gl.ALWAYS,1,255);gl.stencilOp(gl.KEEP,gl.KEEP,gl.REPLACE)}else{drawBasemapLand(view);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1)}
  gl.activeTexture(gl.TEXTURE0+6);gl.bindTexture(gl.TEXTURE_2D,parcelIndexAsset.texture);gl.uniform1i(loc.parcelIndex,6);gl.activeTexture(gl.TEXTURE0+7);gl.bindTexture(gl.TEXTURE_2D,parcelStyleTexture);gl.uniform1i(loc.parcelStyle,7);gl.uniform2f(loc.parcelIndexSize,parcelIndexAsset.width,parcelIndexAsset.height);gl.uniform1f(loc.parcelIndexReady,parcelIndexAsset.ready?1:0);gl.uniform1f(loc.showPlotBorders,mode?1:0);
  const focus=ghostPlot||(!mode&&selectedBuilding?{slot:selectedBuilding.building.slotId,region:selectedBuilding.region.id}:null);
  gl.uniform2f(loc.hoverPlot,focus?focus.slot+1:0,focus?focus.region+1:0);
  gl.uniform1f(loc.hoverValid,ghostPlot?(ghostPlot.valid?1:0):2);gl.uniform1f(loc.paintPlots,1);
- for(const r of state.regions){const color=politicalColors[r.owner];gl.uniform1f(loc.tintAmount,color ? .30+chartWeight*.34 : 0);if(color)gl.uniform3f(loc.tint,...color);const hasWave=captureWaves.has(r.id);
+ for(const r of state.regions){const mesh=regionMeshes.get(r.id),color=politicalColors[r.owner];gl.uniform1f(loc.tintAmount,color ? .30+chartWeight*.34 : 0);if(color)gl.uniform3f(loc.tint,...color);const hasWave=captureWaves.has(r.id);
   if(hasWave)applyCaptureWave(r,now);
-  drawBuffer(regionMeshes.get(r.id),gl.TRIANGLES,color?countryTintBuffers.get(r.id):null,color ? .16 : 0);
+  if(mesh&&terrainInView(mesh.bounds,view))drawBuffer(mesh,gl.TRIANGLES,color?countryTintBuffers.get(r.id):null,color ? .16 : 0);
   if(hasWave)gl.uniform1f(loc.captureStrength,0);
  }gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.paintPlots,0);
- if(hasStencil){gl.stencilMask(0);gl.stencilFunc(gl.EQUAL,0,255);drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.disable(gl.STENCIL_TEST);gl.stencilMask(255)}
- gl.uniform1f(loc.terrainDetail,0);gl.disable(gl.DEPTH_TEST);gl.depthMask(false);drawBuffer(riverBuffer);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);gl.enable(gl.BLEND);gl.depthMask(false);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.depthMask(true);gl.disable(gl.BLEND);gl.uniform1f(loc.roadDetail,0);drawBuffer(bridgeBuffer);drawSelectedRoute();drawBorders(now);if(preferences.trees)drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer);drawMeshBatch(buildingsBuffer);drawFortifications();drawWorkshopActivity(now);actorShadowVertices.length=0;drawCarts();drawFleet();drawMarches();drawBattles(now);if(actorShadowVertices.length)drawForest(true);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);globalThis.gameShell?.frame(gl,state.started);requestAnimationFrame(draw)}
+ if(hasStencil){gl.stencilMask(0);gl.stencilFunc(gl.EQUAL,0,255);drawBasemapLand(view);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.disable(gl.STENCIL_TEST);gl.stencilMask(255)}
+ gl.uniform1f(loc.terrainDetail,0);gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.uniform1f(loc.water,2);
+ drawBuffer(riverBankBuffer);drawBuffer(riverBuffer);
+ gl.uniform1f(loc.water,0);gl.disable(gl.BLEND);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,roadTexture);gl.uniform1i(loc.roadMap,4);gl.uniform1f(loc.roadDetail,1);gl.enable(gl.BLEND);gl.depthMask(false);drawBuffer(roadBuffer);for(const chunk of roadExtensions)drawBuffer(chunk);drawMeshBatch(trailBuffer);drawBuffer(trafficBuffer);gl.depthMask(true);gl.disable(gl.BLEND);gl.uniform1f(loc.roadDetail,0);gl.uniform1f(loc.modelDetail,1);drawBuffer(bridgeBuffer);gl.uniform1f(loc.modelDetail,0);drawBorders(now);if(preferences.trees)drawForest();gl.uniform1f(loc.modelDetail,1);drawMeshBatch(parcelDecorBuffer,view);drawSettlementHousing(view);drawMeshBatch(buildingsBuffer,view);drawFortifications();drawWorkshopActivity(now);actorShadowVertices.length=0;drawCarts();drawFleet();drawMarches();drawBattles(now);if(actorShadowVertices.length)drawForest(true);drawMapFeedbackGeometry();gl.uniform1f(loc.modelDetail,0);if(!councilMapOrder)drawBuffer(ghostBuffer);renderSlotMarkers();renderCargo();renderMarches();renderFleet();const ds=performance.now();updateBattlePanel();renderSieges();renderGateMarkers();renderOrderPing(now);const dd=performance.now()-ds,w5=state._phaseTimings?.worst;if(w5&&dd>(w5['f:dom']||0))w5['f:dom']=dd;w5&&(w5['f:dom:s']=(w5['f:dom:s']||0)+dd,w5['f:dom:n']=(w5['f:dom:n']||0)+1);for(const [el,data] of mapFeedback)positionMapFeedback(el,data);if(dirtyLabels){const ls=performance.now();renderLabels();const ld=performance.now()-ls,w4=state._phaseTimings?.worst;if(w4&&ld>(w4['f:labels']||0))w4['f:labels']=ld;w4&&(w4['f:labels:s']=(w4['f:labels:s']||0)+ld,w4['f:labels:n']=(w4['f:labels:n']||0)+1)}if(labelsJob&&labelStep(6))labelsJob=null;gl.present();const rd=performance.now()-rs,w3=state._phaseTimings?.worst;if(w3&&rd>(w3['f:render']||0))w3['f:render']=rd;w3&&(w3['f:render:s']=(w3['f:render:s']||0)+rd,w3['f:render:n']=(w3['f:render:n']||0)+1);}
 function flash(msg){const t=$('toast');t.textContent=msg;t.classList.add('visible');clearTimeout(flash.t);flash.t=setTimeout(()=>t.classList.remove('visible'),2600)}
 function setSelected(region,tab){
  if(state.selected!==region)hideActionExplanation();
@@ -4727,7 +5393,7 @@ function campaignPetition(owner,region){
 function start(r,preset=null,match=null){
  $('app').classList.remove('campaign-setup');hideActionExplanation();
  state.started=true;r.owner='you';r.buildings.push({type:'city',x:r.slots[0].x,z:r.slots[0].z,slotId:0,scale:r.slots[0].scale,terrain:r.slots[0].terrain,capital:true,population:1000});
- initializeEconomy(state,r);state.civilizationTitles=historicalPolityTitles(r,!!GAME_MAP);state.civilizationName=state.civilizationTitles[0];state.economy.granaries=new Map();state.network=makeTransport(state.regions);state.grainRoute=granaryRoute;state.attachRoute=(region,building)=>attachSupplyRoute(region,building);state.factions={};
+ initializeEconomy(state,r);state.commanderOrigins=new Map([['you',r.id]]);state.civilizationTitles=historicalPolityTitles(r,!!GAME_MAP);state.civilizationName=state.civilizationTitles[0];state.economy.granaries=new Map();state.network=makeTransport(state.regions);state.grainRoute=granaryRoute;state.attachRoute=(region,building)=>attachSupplyRoute(region,building);state.factions={};
  const origin=state.network.hubKeys.get(r.id),candidates=state.regions.filter(other=>other!==r);
  const connected=pathsToHub(state.network,origin);
  const preferred=new Set(candidates.filter(other=>GAME_MAP
@@ -4759,6 +5425,7 @@ function start(r,preset=null,match=null){
   }
   const hub=state.network.hubKeys.get(other.id),path=routeToHub(state.network,hub,origin)?.reverse()||null;
   const phase=count>3?(i*.618034)%1:0;
+  state.commanderOrigins.set(id,other.id);
   const polity=historicalPolity(other,!!GAME_MAP),titles=historicalPolityTitles(other,!!GAME_MAP);
   state.factions[id]={name:polity+(polityCounts.get(polity)>1?' · '+other.city:''),titles,regionId:other.id,gold:250,council:createRealmCouncil(other.id),stocks:{grain:31,wood:5,iron:8,cloth:8,equipment:0},
    good,strategyPace:[.88,1,1.14][i%3],path,_pathHubs:[origin,hub],
@@ -4790,6 +5457,12 @@ function start(r,preset=null,match=null){
  state.councilDiplomacyRoute=(owner,other)=>routeToHub(state.network,state.network.hubKeys.get(realmCapitalId(state,owner)),state.network.hubKeys.get(realmCapitalId(state,other)),supplyFilterFor(owner));if(match?.malagaView!=null)applyMalagaStart(r,match.malagaView);
  state.dispatchVassalTrade=(vassal,lands)=>dispatchTrade(vassal.owner,vassal,lands);
  state.onVassalGranted=region=>refreshCapitalRoutes(false,new Set([region.owner]));
+ state.onFeudCaptured=region=>{
+  enqueueBorders(region);
+  state.visualJobs.push(()=>{rebuildCountryTint(region.owner,region);buildingsBuffer=geometryForBuildings()});
+  refreshSupplyShipments(new Set([region.owner]));
+  dirtyLabels=true;
+ };
  initializeCampaignRecap(state,{capitalId:r.id,rivalIds:startingRivals.map(region=>region.id),preset,malagaView:match?.malagaView});
  for(const owner of ['you',...Object.keys(state.factions)])rebuildCountryTint(owner);$('resource-bar').hidden=false;renderNotifications();cam.x=r.slots[0].x;cam.z=r.slots[0].z;cam.scale=GAME_MAP?.01:.012;$('intro').hidden=true;buildingsBuffer=geometryForBuildings();rebuildRoads();setSelected(r);flash('Столица основана: '+r.city+' · соперников '+startingRivals.length);
 }
@@ -5381,7 +6054,7 @@ function onRebellion(event){
  dirtyLabels=true;
 }
 function onDuchyCaptured(event){
- const {region,attacker,defender,wasCapital,rebellion}=event;
+ const {region,attacker,defender,wasCapital,rebellion,vassal}=event;
  recordRecapTerritory(state,region,defender);
  if(attacker==='you'||defender==='you'){
   startCaptureWave(region,attacker,defender);
@@ -5399,7 +6072,7 @@ function onDuchyCaptured(event){
  refreshSupplyShipments(affected);
  dirtyLabels=true;
  if(attacker==='you'){
-  addNotice('land','Герцогство захвачено',region.name+' · выберите, кто будет управлять герцогством',region.id);
+  addNotice('land','Герцогство захвачено',region.name+(vassal?' · владение '+vassalDisplayName(state,vassal):' · выберите, кто будет управлять герцогством'),region.id);
   flash('Герцогство захвачено: '+region.name);
   showGain(region.slots[0],'+ ГЕРЦОГСТВО','upgrade');
  }else if(defender==='you'){
@@ -5473,7 +6146,7 @@ function addGateGeometry(out,gate){
   const x=point.x+nz*across+nx*along,z=point.z-nx*across+nz*along;
   return [x,roadGround(x,z)+.24+height,z];
  };
- const stone=ready?[.48,.46,.39]:[.40,.34,.25],trim=tint(stone,1.22);
+ const stone=modelMaterial(ready?[.48,.46,.39]:[.40,.34,.25],'stone'),trim=tint(stone,1.22);
  function block(left,right,back,front,base,height,color){
   const a=p(left,back,base),b=p(right,back,base),c=p(right,front,base),d=p(left,front,base);
   const A=p(left,back,height),B=p(right,back,height),C=p(right,front,height),D=p(left,front,height);
@@ -5491,6 +6164,11 @@ function addGateGeometry(out,gate){
   part(.85,1.79,-.62,.62,0,ready?2.3:.68,stone);
   if(!ready)continue;
   part(.78,1.86,-.69,.69,2.19,2.43,trim);
+  for(const along of [-1,1]){
+   const front=along*.614,back=along*.648;
+   part(1.24,1.35,Math.min(front,back),Math.max(front,back),1.31,1.85,tint(stone,.42));
+   part(1.16,1.43,Math.min(front,back)-.017,Math.max(front,back)+.017,1.22,1.31,trim);
+  }
   part(.83,1.23,-.64,.64,2.43,2.69,stone);
   part(1.47,1.80,-.64,.64,2.43,2.69,stone);
   if(breached)continue;
@@ -5542,7 +6220,36 @@ function renderGateMarkers(){
  }
  for(const [gate,el] of gateMarkers)if(!live.has(gate)){el.remove();gateMarkers.delete(gate)}
 }
-function renderSieges(){let layer=$('battle-layer'),sieges=state.sieges||new Map(),live=new Set(sieges.keys());for(const [id,el] of siegePanels)if(!live.has(id)){el.remove();siegePanels.delete(id)}for(const [id,siege] of sieges){let r=state.regions.find(x=>x.id===id);if(!r)continue;let el=siegePanels.get(id);if(!el){el=document.createElement('div');el.className='siege-marker';layer.appendChild(el);siegePanels.set(id,el)}let percent=Math.min(100,Math.floor(siege.progress*100)),status=siege.status==='contested'?'ОСАДА ПРИОСТАНОВЛЕНА':siege.status==='abandoned'?'ОСАДА СНЯТА':'ОСАДА',color=FACTION_COLORS[siege.attacker]||FACTION_COLORS.you,rgb='rgb('+color.map(v=>Math.round(v*255)).join(',')+')';let content='<span>'+status+' · '+percent+'%</span><i><b style="width:'+percent+'%;background:'+rgb+'"></b></i>';if(el.dataset.content!==content){el.dataset.content=content;el.innerHTML=content}let point=project(r.slots[0].x,r.slots[0].z,surfaceHeight(r.slots[0].x,r.slots[0].z)+12);el.style.left=point.x+'px';el.style.top=point.y+'px';el.hidden=point.x<0||point.y<0||point.x>canvas.clientWidth||point.y>canvas.clientHeight}}
+function renderSieges(){
+ const layer=$('battle-layer'),sieges=state.sieges,feuds=state.vassalFeuds,live=new Set();
+ for(const [id,conflict] of [...(sieges||[]),...(feuds||[])]){
+  if(live.has(id))continue;
+  const r=state.regions.find(region=>region.id===id);
+  if(!r)continue;
+  live.add(id);
+  let el=siegePanels.get(id);
+  if(!el){
+   el=document.createElement('div');
+   el.className='siege-marker';
+   el.innerHTML='<span></span><i><b></b></i>';
+   layer.appendChild(el);
+   siegePanels.set(id,el);
+  }
+  const house=vassalById(state,conflict.attackerId,conflict.owner);
+  const percent=Math.floor(conflict.progress*100);
+  const label=house?'МЕЖДОУСОБИЦА · '+({march:'ПОХОД',battle:'БОЙ',siege:'ОСАДА · '+percent+'%'})[conflict.status]:
+   (conflict.status==='contested'?'ОСАДА ПРИОСТАНОВЛЕНА':conflict.status==='abandoned'?'ОСАДА СНЯТА':'ОСАДА')+' · '+percent+'%';
+  if(el.firstChild.textContent!==label)el.firstChild.textContent=label;
+  const bar=el.lastChild;
+  bar.hidden=!!house&&conflict.status!=='siege';
+  bar.firstChild.style.width=percent+'%';
+  bar.firstChild.style.background=paletteCss(house?.color||FACTION_COLORS[conflict.attacker]||FACTION_COLORS.you);
+  const point=project(r.slots[0].x,r.slots[0].z,surfaceHeight(r.slots[0].x,r.slots[0].z)+12);
+  el.style.left=point.x+'px';el.style.top=point.y+'px';
+  el.hidden=point.x<0||point.y<0||point.x>canvas.clientWidth||point.y>canvas.clientHeight;
+ }
+ for(const [id,el] of siegePanels)if(!live.has(id)){el.remove();siegePanels.delete(id)}
+}
 function onBattleChanged(event){
  buildingsBuffer=geometryForBuildings();dirtyLabels=true;
  const {battle,winner}=event;
@@ -5844,7 +6551,7 @@ function botPortPlans(id){
  }
  return fallback?[fallback]:[];
 }
-function developBot(id){let f=state.factions?.[id];if(!f||f.defeated||f.isRebel)return;const tx=(name,fn)=>{const s0=performance.now();const r=fn();const d=performance.now()-s0,w=state._phaseTimings?.worst;if(w&&d>(w['d:'+name]||0))w['d:'+name]=d;return r};let signal=tx('signals',()=>strategySignals(state,id)),reserve=signal.urgency>.5||isAtWar(state,'you',id)?75:85,owned=state.regions.filter(r=>r.owner===id&&!vassalFor(state,r)),legacyReady=owned.length>=2&&armyTroops(state,id)>=100&&owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0)>=2,playerHasPort=state.regions.some(r=>r.owner==='you'&&r.buildings.some(b=>b.type==='port')),tradeRival=state.campaign?.pressure?.path==='trade'&&f.commerceTarget===state.campaign.pressure.owner,islandStart=!!state.seaPetitionPath&&owned.some(r=>r.id===f.regionId&&r.coast&&!r.adj.length),plans=f.gold>=65&&(playerHasPort||legacyReady||tradeRival||islandStart)?tx('portPlans',()=>botPortPlans(id).filter(p=>!vassalFor(state,p.region))):[],opportunity=plans.find(p=>p.reachable),plan=opportunity||(legacyReady||tradeRival||islandStart?plans[0]:null),portBudget=TYPES.port.cost+(opportunity||tradeRival||islandStart?15:70);
+function developBot(id){let f=state.factions?.[id];if(!f||f.defeated||f.isRebel)return;const tx=(name,fn)=>{const s0=performance.now();const r=fn();const d=performance.now()-s0,w=state._phaseTimings?.worst;if(w&&d>(w['d:'+name]||0))w['d:'+name]=d;return r};let signal=tx('signals',()=>strategySignals(state,id)),reserve=signal.urgency>.5||isAtWar(state,'you',id)?75:85,owned=state.regions.filter(r=>r.owner===id&&!vassalFor(state,r)),legacyReady=owned.length>=2&&armyTroops(state,id)>=100&&owned.reduce((n,r)=>n+r.buildings.filter(b=>b.product).length,0)>=2,playerHasPort=state.regions.some(r=>r.owner==='you'&&r.buildings.some(b=>b.type==='port')),tradeRival=state.campaign?.pressure?.path==='trade'&&f.commerceTarget===state.campaign.pressure.owner,islandStart=!!state.seaPetitionPath&&owned.some(r=>r.id===f.regionId&&r.coast&&!r.adj.length),plans=f.gold>=65&&(playerHasPort||legacyReady||tradeRival||islandStart)?tx('portPlans',()=>botPortPlans(id).filter(p=>!vassalFor(state,p.region))):[],opportunity=plans.find(p=>p.reachable),plan=opportunity||(legacyReady||tradeRival||islandStart?plans[0]:null),portBudget=developmentPrice(state,TYPES.port.cost,id)+(opportunity||tradeRival||islandStart?15:70);
  if(owned.length>realmRank(state,id).capacity){
   const excessLands=realmAdministration(state,id).excessLands;
   const region=owned.filter(r=>excessLands.has(r.id)&&vassalGrantCheck(state,r,null,id).ok).sort((a,b)=>duchyStability(a)-duchyStability(b))[0];
@@ -5973,6 +6680,46 @@ function openSeaCourse(from,to){
  return null;
 }
 
+function estuaryWaterAt({x,z}){
+ return !regionAt(state.regions,x,z)&&backgroundHeight(x,z)<-1.45;
+}
+function estuaryWaterPassage(from,to){
+ const wet=(a,b)=>{
+  const steps=Math.max(1,Math.ceil(distance(a,b)/.75));
+  for(let i=0;i<=steps;i++)if(!estuaryWaterAt({x:a.x+(b.x-a.x)*i/steps,z:a.z+(b.z-a.z)*i/steps}))return false;
+  return true;
+ };
+ if(wet(from,to))return [from,to];
+ // Where a sand spit separates the lagoon from open water, follow the inlet.
+ const step=1.5,span=74;
+ const key=(i,j)=>i+':'+j;
+ const cells=[{...from,i:0,j:0,parent:null}],visited=new Set([key(0,0)]);
+ for(let i=0;i<cells.length;i++){
+  const cell=cells[i];
+  if(openWater(cell)&&(GAME_MAP||nearestNavalCell(cell))){
+   const path=[];
+   for(let node=cell;node;node=node.parent)path.push({x:node.x,z:node.z});
+   path.reverse();
+   // Remove grid corners only when the shortcut stays in the water.
+   const route=[path[0]];
+   for(let j=1;j<path.length;){
+    let next=Math.min(path.length-1,j+10);
+    while(next>j&&!wet(route.at(-1),path[next]))next--;
+    route.push(path[next]);j=next+1;
+   }
+   return route;
+  }
+  for(const [di,dj] of [[1,0],[-1,0],[0,1],[0,-1]]){
+   const j=cell.i+di,k=cell.j+dj,id=key(j,k);
+   if(Math.hypot(j,k)*step>span||visited.has(id))continue;
+   const next={x:from.x+j*step,z:from.z+k*step,i:j,j:k,parent:cell};
+   if(!inRing(next.x,next.z,sheetPoints)||!wet(cell,next))continue;
+   visited.add(id);cells.push(next);
+  }
+ }
+ return null;
+}
+
 function riverSeaConnection(system){
  const channel=riverMap.systems[system];
  if(channel.sea!==undefined)return channel.sea;
@@ -5980,14 +6727,29 @@ function riverSeaConnection(system){
  if(!outlet)return channel.sea=null;
  const radius=GAME_MAP?40:58;
  const cacheOpening=point=>{
-  channel.sea=[mouth,point].filter((p,i,path)=>!i||distance(p,path[i-1])>.001);
-  riverMap.addOpening(system,[outlet,...channel.sea]);
+  const steps=Math.max(1,Math.ceil(distance(mouth,point)));
+  let wetStart=null;
+  for(let i=0;i<=steps;i++){
+   const near={x:mouth.x+(point.x-mouth.x)*i/steps,z:mouth.z+(point.z-mouth.z)*i/steps};
+   if(estuaryWaterAt(near)){wetStart=near;break}
+  }
+  const passage=wetStart&&estuaryWaterPassage(wetStart,point);
+  channel.sea=[mouth,...(passage||[point])].filter((p,i,path)=>!i||distance(p,path[i-1])>.001);
+  const source=channel.paths.find(({path})=>path.includes(outlet));
+  riverMap.addOpening(system,[outlet,...channel.sea],source?.name||'',riverWidth(source?.rank??3));
   return channel.sea;
  };
  for(let range=0;range<=radius;range+=2.5){
   for(let i=0;i<(range?16:1);i++){
    const angle=i*Math.PI/8,p={x:mouth.x+range*Math.cos(angle),z:mouth.z+range*Math.sin(angle)};
-   if(openWater(p)&&(!GAME_MAP?nearestNavalCell(p):true))return cacheOpening(p);
+   if(!inRing(p.x,p.z,sheetPoints)||!openWater(p)||!GAME_MAP&&!nearestNavalCell(p))continue;
+   const approach=[outlet,mouth,p];
+   if(approach.slice(1).some((end,i)=>{
+    const start=approach[i],steps=Math.max(1,Math.ceil(distance(start,end)/2));
+    for(let j=0;j<=steps;j++)if(!inRing(start.x+(end.x-start.x)*j/steps,start.z+(end.z-start.z)*j/steps,sheetPoints))return true;
+    return false;
+   }))continue;
+   return cacheOpening(p);
   }
  }
  return channel.sea=null;
@@ -6301,7 +7063,7 @@ function dispatchTrade(owner='you',vassal=null,lands=[]){
  const range=tradeRange(state,owner),goods=ledger.stocks;
  const incoming=economy.shipments.some(ship=>ship.kind==='import'&&shipmentOwner(ship)===owner&&(ship.vassalId??null)===(vassal?.id??null)&&ship.good==='grain');
  const urgent=vassal&&(granaryFor(state,importTown.id)?.fed<.999||importTown.occupation);
- if((!vassal||urgent)&&grainStock<Math.max(8,grainNeed*1.2)&&!incoming&&fleet.landFree>0&&ledger.gold>=TRADE_PRICE.grain){
+ if(grainNeed>0&&(!vassal||urgent)&&grainStock<Math.max(8,grainNeed*1.2)&&!incoming&&fleet.landFree>0&&ledger.gold>=TRADE_PRICE.grain){
   const candidates=partners.map(id=>({id,seller:factionLedger(state,id),reserve:grainReserve(state,id)}))
    .filter(({seller,reserve})=>seller.stocks.grain>=reserve+1)
    .map(candidate=>({...candidate,lane:nearestLandTradeRoute(state,owner,candidate.id,importTown.id)}))
@@ -6395,7 +7157,11 @@ const battlePanels=new Map();
 function updateBattlePanel(){const battles=state.battlePairs||[],layer=$('battle-layer'),live=new Set(battles);for(const [battle,el] of battlePanels)if(!live.has(battle)){el.remove();battlePanels.delete(battle)}for(const battle of battles){let el=battlePanels.get(battle);if(!el){el=document.createElement('section');el.className='battle-panel';el.setAttribute('aria-label','Ход сражения');layer.appendChild(el);battlePanels.set(battle,el)}let a=battle.totalA||0,b=battle.totalB||0,total=a+b,ratio=total?Math.max(3,Math.min(97,a/total*100)):50,nearest=state.regions.reduce((best,r)=>!best||distance(r.slots[0],battle.point)<distance(best.slots[0],battle.point)?r:best,null),color=owner=>'rgb('+(FACTION_COLORS[owner]||[.7,.7,.7]).map(v=>Math.round(v*255)).join(',')+')',label=battle.bridgeA||battle.bridgeB?'Бой у моста · '+(battle.bridgeA||battle.bridgeB):'Битва у '+(nearest?.city||'границы'),content=`<div class="battle-meter"><i style="width:${ratio}%;background-color:${color(battle.ownerA)}"></i><i style="width:${100-ratio}%;background-color:${color(battle.ownerB)}"></i></div><div class="battle-summary"><div class="battle-side"><b>⚔ ${Math.ceil(a).toLocaleString(interfaceLocale)}</b><small>Потери ${Math.floor(battle.lossA||0).toLocaleString(interfaceLocale)}</small></div><div class="battle-center"><b>${label}</b><small>${battle.sideA?.length||0} отр. · ${battle.sideB?.length||0} отр.</small></div><div class="battle-side right"><b>${Math.ceil(b).toLocaleString(interfaceLocale)} ⚔</b><small>Потери ${Math.floor(battle.lossB||0).toLocaleString(interfaceLocale)}</small></div></div>`;if(el.dataset.content!==content){el.dataset.content=content;el.innerHTML=content}let point=project(battle.point.x,battle.point.z,roadGround(battle.point.x,battle.point.z)+8);el.style.left=point.x+'px';el.style.top=point.y+'px';el.hidden=point.x<0||point.y<0||point.x>canvas.clientWidth||point.y>canvas.clientHeight}}
 function updateToolAffordability(){
  document.querySelectorAll('.tool').forEach(button=>{
-  const type=button.dataset.type,cost=TYPES[type]?.cost||0;
+  const type=button.dataset.type,cost=developmentPrice(state,TYPES[type]?.cost||0);
+  const label=cost+' зл.';
+  const price=button.querySelector('.cost'),fact=button.querySelector('.tool-fact[data-game-stat="gold"] b');
+  if(price.textContent!==label)price.textContent=label;
+  if(fact.textContent!==label)fact.textContent=label;
   const missing=state.started?costShortfalls(state.gold,null,cost):[];
   const unaffordable=missing.length>0;
   button.classList.toggle('unaffordable',unaffordable);
@@ -6555,7 +7321,7 @@ function councilDeadline(seconds){
  return globalThis.gameI18n?.date(date,false)??(date.day+' '+MONTHS_RU[date.month]);
 }
 function treasuryIncomeReport(){return realmTreasuryReport(state)}
-function updateTreasury({taxes,upkeep,committed,free,penalty,reparations}){
+function updateTreasury({taxes,upkeep,administration,committed,free,penalty,reparations}){
  const money=$('money'),rate=$('gold-rate');
  money.innerHTML=Math.floor(state.gold)+' <em>зл.</em>';
  const rounded=Number(free.toFixed(1));
@@ -6566,6 +7332,7 @@ function updateTreasury({taxes,upkeep,committed,free,penalty,reparations}){
  rate.dataset.gameStat=rounded<0?'loss':'income';
  const details=[
   'Налоги в казну державы '+councilGold(taxes)+' зл./мин · содержание войск '+councilGold(upkeep)+' зл./мин',
+  administration?'Управление землями −'+councilGold(administration)+' зл./мин':null,
   'Совету выделено до '+councilGold(committed)+' зл./мин из поступлений',
   reparations.outgoing?'Репарации к уплате −'+councilGold(reparations.outgoing)+' зл./мин':null,
   reparations.incoming?'Репарации к получению +'+councilGold(reparations.incoming)+' зл./мин при наличии средств у плательщика':null,
@@ -6875,15 +7642,15 @@ $('buildings-list').onclick=event=>{
  if(region?.owner==='you'&&building)inspectMapBuilding(region,building);
 };
 function updateDuchyCardHeader(region){
- const own=region.owner==='you',rebel=state.factions?.[region.owner]?.isRebel;
+ const own=region.owner==='you';
  $('card').dataset.atlas=GAME_MAP?'mediterranean':'baltic';
  $('type').textContent=region.owner==='neutral'?'Нейтральное герцогство':countryName(region.owner);
  $('name').textContent=region.name;
- const shield=$('duchy-card-crest'),crestKey=region.owner+':'+(region.id===state.capitalId);
+ const shield=$('duchy-card-crest'),crestKey=region.id+':'+region.owner;
  if(shield.dataset.crest!==crestKey){
   shield.dataset.crest=crestKey;
   shield.style.setProperty('--faction-crest',FACTION_COLORS[region.owner]?factionCss(region.owner):'#607b77');
-  shield.innerHTML=rebel?rebelCrest(region.owner):heraldryShield(region.owner+':'+region.id,40);
+  shield.innerHTML=historicalShield(region,40);
  }
  const tags=[region.city,own&&region.id===state.capitalId?'столица державы':null,region.coast?'побережье':null];
  const caption=capitalStars(region)+tags.filter(Boolean).join(' · '),desc=$('desc');
@@ -6974,6 +7741,7 @@ function updateDuchyVassal(region){
  if(vassal){
   const lands=vassal.lands.map(id=>councilRegion(state,id,region.owner)).filter(Boolean);
   const tier=vassalTierInfo(vassal),promotion=vassalPromotionCheck(state,vassal,region.owner);
+  const feud=vassalFeudFor(state,vassal.id);
   $('duchy-vassal-lands').textContent=lands.map(land=>land.name).join(' · ')+' ('+lands.length+'/'+tier.capacity+') · титул «'+tier.name+'»';
   if(!own)return;
   const income=lands.reduce((sum,land)=>sum+duchyTax(state,land)*VASSAL_SHARE,0);
@@ -6986,7 +7754,10 @@ function updateDuchyVassal(region){
    const value=councilGold(good==='grain'?grain:vassal.stocks[good]);
    return `<span title="${GOODS_LABELS[good]||'Снаряжение'}">${resourceGlyph(good)} ${value}</span>`;
   }).join('');
- $('duchy-vassal-status').textContent=[vassal.status,vassal.recruitmentStatus].filter(Boolean).join(' · ')+(promotion.next
+ const grace=vassal.foundedAt==null?0:vassal.foundedAt+VASSAL_FEUD_GRACE-state.economy.seconds;
+ const feudStatus=feud?'Междоусобица · '+feud.attackerName+' против '+feud.defenderName:
+  grace>0?'Защита от междоусобиц · ещё '+councilDays(grace):'';
+ $('duchy-vassal-status').textContent=[feudStatus,vassal.status,vassal.recruitmentStatus].filter(Boolean).join(' · ')+(promotion.next
    ?' · до титула «'+promotion.next.name+'»: '+(promotion.ok?'повышение':promotion.reason.replace('Нужно: ',''))
    :'');
   const last=vassal.lastAction;
@@ -7083,7 +7854,7 @@ function updateDuchyCard(region){
  else if(duchyTab==='army'){updateDuchyDefense(region);updateRecruitment(region);}
  else{updatePetition(region);updateWarPanel(region);}
  if(duchyTab==='overview')useActionTitles([
-  ['duchy-city-repair','Восстановление города','Ремонт стоит '+SEAT_REPAIR_GOLD+' зл.'],
+  ['duchy-city-repair','Восстановление города','Ремонт стоит '+landDevelopmentPrice(state,SEAT_REPAIR_GOLD,region)+' зл.'],
   ['duchy-city-aid','Помощь жителям','Отправляет зерно из столицы'],['realm-promote','Ранг державы',$('realm-requirements').textContent]]);
  if(duchyTab==='economy')useActionTitles([
   ['relief-send','Помощь жителям','Доставит 6 ед. зерна за 20 зл.'],['duchy-market-build','Торговый центр',$('duchy-market-stock').textContent]]);
@@ -7112,7 +7883,7 @@ function updateSettlementDock(){
  const crest=$('seat-summary-crest');
  if(crest.dataset.region!==String(region.id)){
   crest.dataset.region=String(region.id);
-  crest.innerHTML=heraldryShield('realm:'+region.id,23);
+  crest.innerHTML=historicalShield(region,23);
   $('seat-summary-name').textContent=region.city;
  }
  seatSummaryButton.setAttribute('aria-expanded',String(state.selected===region));
@@ -7122,7 +7893,7 @@ function updateSettlementDock(){
  control.dataset.level=stability<=50?'critical':stability<70?'warning':'normal';
  $('seat-summary-population').textContent=Math.floor(duchyPopulation(region)).toLocaleString(interfaceLocale);
 }
-function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncMapStats();const income=treasuryIncomeReport(),domain=realmAdministration(state,'you');renderCampaignPanel();updateMuster();updateSettlementDock();updateRealmOverview(domain);updateCouncil(income);if(selectedBuilding)updateBuildingDetails();let slotState=mode?mode+':'+(state.gold>=TYPES[mode].cost):'';if(slotState!==lastSlotAffordability){lastSlotAffordability=slotState;dirtyLabels=true;if(mode&&hover)updateGhost(hover)}updateBattlePanel();$('traffic-legend').hidden=!state.started||!state.economy?.roadTraffic?.size;updateToolAffordability();let d=gameDate(state.economy?.seconds||0);$('game-date').textContent=globalThis.gameI18n?.date(d)??(d.day+' '+MONTHS_RU[d.month]+' '+d.year+' г.');updateTreasury(income);
+function updateUI(){slotMarkerRevision++;if(state.started&&!state.defeated)syncMapStats();const income=treasuryIncomeReport(),domain=realmAdministration(state,'you');renderCampaignPanel();updateMuster();updateSettlementDock();updateRealmOverview(domain);updateCouncil(income);if(selectedBuilding)updateBuildingDetails();let slotState=mode?mode+':'+developmentPrice(state,TYPES[mode].cost)+':'+(state.gold>=developmentPrice(state,TYPES[mode].cost)):'';if(slotState!==lastSlotAffordability){lastSlotAffordability=slotState;dirtyLabels=true;if(mode&&hover)updateGhost(hover)}updateBattlePanel();$('traffic-legend').hidden=!state.started||!state.economy?.roadTraffic?.size;updateToolAffordability();let d=gameDate(state.economy?.seconds||0);$('game-date').textContent=globalThis.gameI18n?.date(d)??(d.day+' '+MONTHS_RU[d.month]+' '+d.year+' г.');updateTreasury(income);
  $('realm-label').textContent='ДОМЕН';
  const domainCount=$('lands'),domainButton=$('domain-shortcut');
  domainCount.textContent=state.started?domain.direct+' / '+domain.capacity:'0';
@@ -7202,6 +7973,7 @@ function writeMarketPolicy(button,market){
  button.title=supplies?'Переключить на экспорт складских товаров':'Переключить на отправку складских товаров в столицу';
 }
 function toggleMarketPolicy(region){
+ if(!canDevelopLand(state,region))return;
  const market=tradeCenter(state,region?.id)?.market;
  if(!market)return;
  market.policy=market.policy==='capital'?'export':'capital';
@@ -7346,7 +8118,7 @@ function updateRealmOverview(administration=realmAdministration(state,'you')){
  let list=$('realm-overview-list'),ids=new Set(matches.map(x=>x.r.id));for(const [id,el] of realmOverviewRows)if(!ids.has(id)){el.remove();realmOverviewRows.delete(id)}
  for(const {r,c,m,u,priority,cut,port,waiting,food} of matches){let row=realmOverviewRows.get(r.id);if(!row){row=document.createElement('button');row.type='button';row.className='realm-overview-row';let title=document.createElement('strong'),stats=document.createElement('span'),reason=document.createElement('small');row.appendChild(title);row.appendChild(stats);row.appendChild(reason);row.onclick=()=>{let target=state.regions.find(x=>x.id===r.id&&x.owner==='you');if(!target)return;panel.hidden=true;toggle.setAttribute('aria-expanded','false');setSelected(target,'economy');let p=target.slots?.[0];if(p){cam.x=p.x;cam.z=p.z;dirtyLabels=true}};realmOverviewRows.set(r.id,row)}
  let cause=r.awaitingAdministration?'Ожидает назначения управления':u?.protectedByArmy?'Армия сдерживает бунт':u?.days!=null?'Проверка риска через '+u.days+' дн.':r.occupation?.repairAt!=null?'Восстанавливается столица':r.occupation&&duchySeat(r)?.damaged?'Столица требует ремонта':u?.progress>0?'Волнения снижаются':food?'Не хватает зерна в герцогстве':cut?'Отрезано построек: '+cut:m.besieged?'Осада':!vassalFor(state,r)&&c.dist==null?'Нет связи со столицей':c.burden?'Сверх лимита · контроль −'+c.burden+' п. п.':m.recent?'Недавний захват':m.crowded?'Не хватает жилья':'Порядок';let pop=(r.buildings||[]).filter(b=>b.type==='city').reduce((n,b)=>n+(b.population||0),0);
- row.className='realm-overview-row'+(priority>=3?' urgent':priority?' warning':'');row.children[0].replaceChildren();row.children[0].insertAdjacentHTML('afterbegin',heraldryShield(r.owner+':'+r.id,16));row.children[0].append(r.name+(r.id===state.capitalId?' · столица':c.burden?' · сверх лимита':''));row.children[1].textContent='Контроль '+Math.round(c.value)+'% → '+Math.round(c.target)+'% · жители '+Math.floor(pop).toLocaleString(interfaceLocale);row.children[2].textContent=cause+' · настроение '+Math.round(m.value)+' · волнения '+Math.floor(u?.progress||0)+'%'
+ row.className='realm-overview-row'+(priority>=3?' urgent':priority?' warning':'');row.children[0].replaceChildren();row.children[0].insertAdjacentHTML('afterbegin',historicalShield(r,18));row.children[0].append(r.name+(r.id===state.capitalId?' · столица':c.burden?' · сверх лимита':''));row.children[1].textContent='Контроль '+Math.round(c.value)+'% → '+Math.round(c.target)+'% · жители '+Math.floor(pop).toLocaleString(interfaceLocale);row.children[2].textContent=cause+' · настроение '+Math.round(m.value)+' · волнения '+Math.floor(u?.progress||0)+'%'
   +(vassalFor(state,r)?' · вассал':'')+(port?' · ожидает морской отправки '+Math.floor(waiting)+' ед.':'')}let order=matches.map(x=>x.r.id).join(',');if(list.dataset.order!==order){for(const {r} of matches)list.appendChild(realmOverviewRows.get(r.id));list.dataset.order=order}
 }
 $('realm-overview-toggle').onclick=()=>{let panel=$('realm-overview');panel.hidden=!panel.hidden;if(!panel.hidden){showCampaignPanel(false);showCouncil(false);$('notifications-panel').hidden=true;$('notifications-toggle').setAttribute('aria-expanded','false')}$('realm-overview-toggle').setAttribute('aria-expanded',String(!panel.hidden));updateRealmOverview()};
@@ -7440,6 +8212,7 @@ function updateDuchyCity(region){
  if(panel.hidden)return;
  function growthHint(r){
   const status=r.growthStatus,trend=r.populationTrend||0;
+  if(status==='subsistence')return ' · предел 200 жителей на город без запасов зерна';
   if(status==='jobs')return ' · рост остановлен: нет рабочих мест';
   if(status==='underwork')return (seat.population||0)<1000?' · бурный рост поселения — скоро наберётся тысяча':' · рост замедлен: рабочих мест меньше, чем работников';
   if(status==='food')return ' · рост остановлен: не хватает еды';
@@ -7451,7 +8224,7 @@ function updateDuchyCity(region){
  if(own){
   const upgrade=upgradeCheck(state,region,seat),button=$('duchy-city-upgrade'),seatJobs=buildingJobs(seat);
   setGameStatText($('duchy-city-housing'),Math.floor(seat.population||0).toLocaleString(interfaceLocale)+' жителей · '+cityHousing(seat).toLocaleString(interfaceLocale)+' мест жилья · '+seatJobs+' рабочих мест · ур. '+(seat.level||1)+growthHint(region));
-  button.hidden=!!seat.housingClosed;
+  button.hidden=!!seat.housingClosed||!canDevelopLand(state,region);
   $('duchy-city-upgrade-label').textContent=upgrade.cost?'Улучшить город · '+upgrade.cost+' зл.':'Город полностью улучшен';
   button.disabled=!upgrade.ok;
   const benefits=upgrade.nextHousing?'Жильё '+cityHousing(seat)+' → '+upgrade.nextHousing+' · рабочие места '+seatJobs+' → '+upgrade.nextJobs+' · довольство +2 к цели'+(seat.capital?' · один дополнительный караван':''):'Достигнут максимальный уровень';
@@ -7468,8 +8241,8 @@ function updateDuchyCity(region){
    'Питание налаживается · запас на '+recovery.foodDays+' дн.':'Не хватает зерна · нужен местный урожай или обоз';
   $('duchy-city-unrest').textContent=(unrest?.risk?'До бунта ≈ '+unrest.days+' дн. · ':'')+
    'Ждут возвращения: '+Math.floor(region.displacedResidents||0).toLocaleString(interfaceLocale);
-  repair.hidden=!recovery.damaged||recovery.repairing;
-  $('duchy-city-repair-label').textContent='Восстановить город · '+SEAT_REPAIR_GOLD+' зл.';
+  repair.hidden=!recovery.damaged||recovery.repairing||!canDevelopLand(state,region);
+  $('duchy-city-repair-label').textContent='Восстановить город · '+landDevelopmentPrice(state,SEAT_REPAIR_GOLD,region)+' зл.';
   repair.disabled=!check.ok;repair.title=check.reason||'';
   const aid=$('duchy-city-aid'),aidCheck=reliefCheck(state,region);
   aid.hidden=recovery.fed;aid.disabled=recovery.reliefPending||!aidCheck.ok;
@@ -7486,11 +8259,11 @@ function updateDuchyStores(region){
   stock.textContent=grain.stock.toFixed(1)+' ед. · '+grainDays(grain);
   stock.title='Расход '+grain.need.toFixed(1)+' ед./мин · запас без порчи '+grain.storage+' ед. · бонус своего урожая +'+(grain.harvestBonus*100).toFixed(1)+' п. п. базового роста';
   $('duchy-granary-route').textContent=grainDeliveryLabel(grain);
-  setGameStatText($('duchy-granary-balance'),'Местный урожай '+grain.kept.toFixed(1)+' зерна · расход '+grain.need.toFixed(1)+' · порча '+grain.spoilage.toFixed(1)+' ед./мин');
+  setGameStatText($('duchy-granary-balance'),'Городские поля кормят '+Math.floor(grain.subsistence)+' жителей · фермы дают '+grain.kept.toFixed(1)+' зерна · расход запасов '+grain.need.toFixed(1)+' · порча '+grain.spoilage.toFixed(1)+' ед./мин');
   const storeCheckResult=storeCheck(state,region),storeButton=$('duchy-store-build');
   storeButton.disabled=!storeCheckResult.ok;storeButton.title=storeCheckResult.reason||'';
   storeButton.textContent=region.store&&region.store.level>=STORE_MAX_LEVEL?'Склад · уровень '+region.store.level:
-   (region.store?'Улучшить склад · уровень '+(region.store.level+1)+' · '+STORE_COST.gold+' зл.':'Построить склад · '+STORE_COST.gold+' зл. · '+STORE_COST.wood+' дер.');
+   (region.store?'Улучшить склад · уровень '+(region.store.level+1)+' · '+landDevelopmentPrice(state,STORE_COST.gold,region)+' зл.':'Построить склад · '+landDevelopmentPrice(state,STORE_COST.gold,region)+' зл. · '+STORE_COST.wood+' дер.');
   $('duchy-store-status').textContent=region.store
    ?'Местная доля зерна +'+(STORE_SHARE*region.store.level*100)+'% · ёмкость без порчи +'+(30*region.store.level)+' ед. Склад продлевает выдержку при осаде.'
    :'Плюс 30 ед. зерна без порчи за уровень. Увеличивает долю местного урожая и продлевает выдержку при осаде.';
@@ -7505,11 +8278,12 @@ function updateDuchyStores(region){
   const button=$('duchy-market-build'),check=marketCheck(state,region);
   button.hidden=!!market;button.disabled=!check.ok;button.title=check.reason||'';
   $('duchy-market-stock').textContent=market?marketStockText(market):
-   MARKET_COST.gold+' зл. · '+MARKET_COST.wood+' дер. · '+MARKET_COST.iron+' жел. · '+MARKET_BUILD_SECONDS/SECONDS_PER_GAME_DAY+' дн.';
+   landDevelopmentPrice(state,MARKET_COST.gold,region)+' зл. · '+MARKET_COST.wood+' дер. · '+MARKET_COST.iron+' жел. · '+MARKET_BUILD_SECONDS/SECONDS_PER_GAME_DAY+' дн.';
   $('duchy-market-status').textContent=market?marketStatus(region):
    (seat.level||1)<2?'Доступен после улучшения города до уровня 2':
    'Получает древесину, железо и ткани из столицы для торговли.';
   writeMarketPolicy($('duchy-market-policy'),market);
+  if(!canDevelopLand(state,region))$('duchy-market-policy').hidden=true;
  }
 }
 function updateDuchyDefense(region){
@@ -7523,12 +8297,12 @@ function updateDuchyDefense(region){
   const armoryJob=armory?.ready?workforceReport(region).byBuilding.get(armory):null;
   $('duchy-armory-status').textContent=armory?armorySummary(region)+(armoryJob?' · работники '+armoryJob.workers+' / '+armoryJob.capacity:''):
    (seat.level||1)<2?'Доступна после улучшения главного города до уровня 2':
-   ARMORY_COST.gold+' зл. · '+ARMORY_COST.wood+' дер. · '+ARMORY_COST.iron+' жел. · стройка '+councilDays(ARMORY_BUILD_TIME);
+   landDevelopmentPrice(state,ARMORY_COST.gold,region)+' зл. · '+ARMORY_COST.wood+' дер. · '+ARMORY_COST.iron+' жел. · стройка '+councilDays(ARMORY_BUILD_TIME);
   const goal=Object.fromEntries(MARKET_GOODS.map(good=>[good,EQUIPMENT_RECIPE[good]*ARMORY_BUFFER]));
   $('duchy-armory-stocks').textContent=armory?.ready?materialStockText(armory.stocks,goal)+
    ' · на складе '+armory.output+' компл.':'Комплект требует '+materialStockText(EQUIPMENT_RECIPE)+'.';
   $('duchy-armory-delivery').textContent=armory?.ready?armoryDeliveryText(region):'';
-  $('duchy-armory-policy-label').hidden=!armory?.ready;
+  $('duchy-armory-policy-label').hidden=!armory?.ready||!canDevelopLand(state,region);
   $('duchy-armory-policy').value=armory?.policy||'normal';
  }
  $('fortification-panel').hidden=!fort&&(!own||!seat);
@@ -7537,13 +8311,13 @@ function updateDuchyDefense(region){
  build.hidden=!check?.passages;requirements.hidden=!check?.passages;
  if(check){
   build.disabled=!check.ok;
-  requirements.textContent=(check.passages?FORT_COST.gold+' зл. · '+FORT_COST.wood+' дер. · '+FORT_COST.iron+' жел. · '+Math.ceil(FORT_BUILD_SECONDS/SECONDS_PER_GAME_DAY)+' дн.':'')+
+  requirements.textContent=(check.passages?landDevelopmentPrice(state,FORT_COST.gold,region)+' зл. · '+FORT_COST.wood+' дер. · '+FORT_COST.iron+' жел. · '+Math.ceil(FORT_BUILD_SECONDS/SECONDS_PER_GAME_DAY)+' дн.':'')+
    (check.ok?'':(check.passages?' · ':'')+check.reason);
  }
  $('fortification-status').textContent=fort?(gates.length?ready.length+' из '+gates.length+' ворот держат проход':'Внешних проходов сейчас нет'):
   (check?.passages?.length?check.passages.length+' проходов через внешнюю границу':'Границы для укрепления нет');
  const select=$('fortification-priority'),list=$('fortification-gates');
- $('fortification-priority-label').hidden=!own||ready.length<2;
+ $('fortification-priority-label').hidden=!own||ready.length<2||!canDevelopLand(state,region);
  const ids=gates.map(gate=>gate.key).join('|'),readyIds=ready.map(gate=>gate.key).join('|');
  if(select.dataset.gates!==readyIds){
   select.dataset.gates=readyIds;select.textContent='';
@@ -7660,7 +8434,7 @@ $('duchy-supply-priority').onclick=()=>{
 };
 const generalNumerals=['','I','II','III'];
 let playerGeneralSlot=1;
-const generalName=slot=>'Генерал '+generalNumerals[slot];
+const generalName=(slot,owner='you')=>generalCommanderName(state,owner,slot)||'Свободное командование '+generalNumerals[slot];
 function updateGeneralPickers(){
  const limit=realmGeneralLimit(state);
  playerGeneralSlot=Math.min(limit,playerGeneralSlot);
@@ -7740,7 +8514,7 @@ function updateMuster() {
   const status = order ? 'Сбор · '+Math.ceil(order.duration-order.elapsed)+' с · '+orders.length+'/'+RECRUIT_QUEUE_LIMIT+(check.ok?' · +100':'')
                      : check.ok ? '+100 · ' + check.duration + ' с'+(check.equipped?' · со снаряжением':'') : check.reason;
   button.replaceChildren();
-  button.insertAdjacentHTML('afterbegin',heraldryShield(region.owner+':'+region.id,15));
+  button.insertAdjacentHTML('afterbegin',historicalShield(region,17));
   button.append(document.createTextNode(region.city+' — '+status));
   const target=explainAction(button,'Набор в городе '+region.city,check.reason||(order?
    'В очереди '+orders.length+' отр. · сейчас собирается '+order.troops+' солдат.':
@@ -7791,7 +8565,7 @@ function renderCampaignStarts(){
   if(!region)continue;
   const btn=document.createElement('button');
   btn.type='button';
-  btn.innerHTML='<strong>'+heraldryShield('start:'+region.id,18)+'<span>'+region.city+'</span></strong><em>'+preset.title+'</em><span>'+preset.brief+'</span>';
+  btn.innerHTML='<strong>'+historicalShield(region,19)+'<span>'+region.city+'</span></strong><em>'+preset.title+'</em><span>'+preset.brief+'</span>';
   btn.dataset.startRegion=region.id;
   btn.setAttribute('aria-pressed','false');
   const regionId=region.id;
@@ -8454,7 +9228,7 @@ $('occupy-neutral').onclick=()=>{
  updateUI();
 };
 $('petition-send').onclick=()=>{const r=state.selected,q=sendPetition(state,'you',r);if(!q.ok){flash(q.reason);updateUI();return}flash('Обоз отправлен: '+r.city+' · '+Math.ceil(q.ship.duration)+' сек.');updateUI()};
-const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест в сфере услуг и +1 к цели довольства.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает торговлю с портами соперников. Стройте у моря или судоходной реки.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
+const TOOL_INFO={city:['Город I уровня даёт 1 800 мест жилья, 60 рабочих мест и +1 к цели довольства. Городской урожай кормит до 200 жителей.','Улучшение добавляет жильё, рабочие места и развитие. Уровень столицы также даёт караваны и открывает повышение ранга.'],grain:['Ферма кормит население и войска. Сытое герцогство с избытком своего урожая получает до +0,3 п. п. базового роста за минуту.','Равнина даёт больше урожая. Излишек сверх вместимости хранилища постепенно портится.'],wood:['Лесопилка заготавливает древесину для строительства и кораблей.','Лучшее место: лес.'],iron:['Рудник добывает железо для вооружения.','Лучшее место: горы и месторождения.'],cloth:['Ткацкая мастерская производит ткани для армии и торговли.','Равнины и леса дают обычную выработку.'],port:['Открывает торговлю с портами соперников. Стройте у моря или судоходной реки.','Корабль перевозит общий груз; цена на 50% выше, спрос до 60 ед. на товар. Нужен мир и спрос покупателя.']};
 const ICONS={
  city:'<path d="M4 15 16 5l12 10M7 13v14h18V13M13 27v-8h6v8M21 8V5h4v6"/>',
  grain:'<path d="M16 29V8m0 6c-5 0-8-2-8-6 5 0 8 2 8 6zm0 7c-6 0-9-2-9-7 6 0 9 2 9 7zm0-7c5 0 8-2 8-6-5 0-8 2-8 6zm0 7c6 0 9-2 9-7-6 0-9 2-9 7zm0-13c-3-3-2-5 0-6 2 1 3 3 0 6z"/>',
@@ -8547,7 +9321,7 @@ function renderSlotMarkers(){
   slotMarkerView='';
   const active=new Set(),layer=$('slot-markers');
   for(const region of state.started?state.regions:[]){
-   if(region.owner!=='you'||(!mode&&region!==state.selected))continue;
+   if(region.owner!=='you'||(mode?!canDevelopLand(state,region):region!==state.selected))continue;
    const occupiedSlots=new Map(region.buildings.map(building=>[building.slotId,building]));
    for(const slot of region.slots){
     const building=occupiedSlots.get(slot.id);
@@ -8659,7 +9433,17 @@ function selectArea(x1,y1,x2,y2){
  return {armies:group.length,cargos:cargos.length};
 }
 function updateSelectionBox(rect,x,y){let box=$('selection-box'),a=drag.x-rect.left,b=drag.y-rect.top;box.style.left=Math.min(a,x)+'px';box.style.top=Math.min(b,y)+'px';box.style.width=Math.abs(x-a)+'px';box.style.height=Math.abs(y-b)+'px';box.hidden=false}
-canvas.addEventListener('pointerdown',e=>{const button=e.button;if(button>2||button===2&&!mode)return;drag={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false,button,select:button===0&&!councilMapOrder&&!mode&&state.started};canvas.setPointerCapture(e.pointerId);if(button!==0)e.preventDefault()});
+const mapSurface=$('app');
+mapSurface.addEventListener('pointerdown',e=>{
+ const button=e.button;
+ // The paper clip removes the canvas from hit testing over the desk.
+ if(e.target!==canvas&&(e.target!==mapSurface||button!==1))return;
+ if(button>2||button===2&&!mode)return;
+ drag={x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,moved:false,button,
+  select:button===0&&!councilMapOrder&&!mode&&state.started};
+ canvas.setPointerCapture(e.pointerId);
+ if(button!==0)e.preventDefault();
+});
 canvas.addEventListener('pointermove',e=>{let rect=canvas.getBoundingClientRect();if(drag){if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;if(drag.moved){if(drag.select){updateSelectionBox(rect,e.clientX-rect.left,e.clientY-rect.top)}else if(drag.button===1){const speed=preferences.mouseSpeed/100;moveCameraScreen((e.clientX-drag.lastX)*speed,(e.clientY-drag.lastY)*speed)}}drag.lastX=e.clientX;drag.lastY=e.clientY}
  const x=e.clientX-rect.left,y=e.clientY-rect.top;
  if(councilMapOrder)return;
@@ -8789,7 +9573,7 @@ function resetGame(){
  warAlerts.length=0;warAlertReturnFocus=null;$('war-alert').hidden=true;closeCampaignReplay(false);resetGameFeedback();$('app').classList.add('campaign-setup');hideActionExplanation();duchyTab='overview';$('duchy-pages').scrollTop=0;
  for(const id of ['duchy-control-details','duchy-war-details'])$(id).open=false;$('council-month-report').hidden=true;showCouncil(false);showCouncilTab('steward');
  councilDrafts.clear();cityAdvisors.clear();
- showCampaignPanel(false);$('campaign-finale').hidden=true;realmFilter='all';for(const filter of realmFilters) $('realm-'+filter).setAttribute('aria-pressed',String(filter==='all'));$('fleet-actions').hidden=true;selectedWarship=null;for(const marker of fleetMarkers.values())marker.remove();fleetMarkers.clear();orderPing=null;$('order-ping').hidden=true;$('patrol-range').hidden=true;$('muster-list').dataset.regions='';setMusterOpen(false);$('realm-overview').hidden=true;$('realm-overview-toggle').setAttribute('aria-expanded','false');closeBorderModal();$('defeat').hidden=true;$('notifications-panel').hidden=true;$('notifications-toggle').setAttribute('aria-expanded','false');closeBuilding();for(const el of cargoElements.values())el.remove();cargoElements.clear();$('effects-layer').textContent='';$('resource-bar').hidden=true;simClock=0;lastFrame=null;state={regions:HISTORICAL_REGIONS.map(initRegion),gold:450,started:false,selected:null};updateParcelStyles([]);mode=null;hover=null;$('app').classList.remove('placing-buildings');$('army-layer').style.zIndex='4';$('cargo-layer').style.zIndex='3';selectedArmy=null;selectedGroup=[];selectedCargo=null;selectedCargoGroup=[];$('selection-box').hidden=true;$('cargo-inspector').hidden=true;$('object-chooser').hidden=true;lastSlotAffordability='';playerGeneralSlot=1;for(const el of battlePanels.values())el.remove();battlePanels.clear();for(const el of siegePanels.values())el.remove();siegePanels.clear();if(trafficBuffer){gl.deleteBuffer(trafficBuffer.buffer);trafficBuffer=null}if(selectedRouteBuffer){gl.deleteBuffer(selectedRouteBuffer.buffer);selectedRouteBuffer=null}selectedRoutePath=null;deleteMeshBatch(parcelDecorBuffer);parcelDecorBuffer=null;parcelDecorCache.clear();parcelSignature='';parcelSurfaceSignature='';trafficRebuildAt=0;for(const el of marchElements.values())el.remove();marchElements.clear();document.querySelectorAll('.tool').forEach(b=>b.classList.remove('active'));$('intro').hidden=false;$('placement').hidden=true;clearGhost();buildingsBuffer=geometryForBuildings();rebuildRoads();cam=startingCamera();clearCountryTints();refreshBorders();dirtyLabels=true;renderNotifications();updateUI()}
+ showCampaignPanel(false);$('campaign-finale').hidden=true;realmFilter='all';for(const filter of realmFilters) $('realm-'+filter).setAttribute('aria-pressed',String(filter==='all'));$('fleet-actions').hidden=true;selectedWarship=null;for(const marker of fleetMarkers.values())marker.remove();fleetMarkers.clear();orderPing=null;$('order-ping').hidden=true;$('patrol-range').hidden=true;$('muster-list').dataset.regions='';setMusterOpen(false);$('realm-overview').hidden=true;$('realm-overview-toggle').setAttribute('aria-expanded','false');closeBorderModal();$('defeat').hidden=true;$('notifications-panel').hidden=true;$('notifications-toggle').setAttribute('aria-expanded','false');closeBuilding();for(const el of cargoElements.values())el.remove();cargoElements.clear();$('effects-layer').textContent='';$('resource-bar').hidden=true;simClock=0;lastFrame=null;state={regions:HISTORICAL_REGIONS.map(initRegion),gold:450,started:false,selected:null};updateParcelStyles([]);mode=null;hover=null;$('app').classList.remove('placing-buildings');$('army-layer').style.zIndex='4';$('cargo-layer').style.zIndex='3';selectedArmy=null;selectedGroup=[];selectedCargo=null;selectedCargoGroup=[];$('selection-box').hidden=true;$('cargo-inspector').hidden=true;$('object-chooser').hidden=true;lastSlotAffordability='';playerGeneralSlot=1;for(const el of battlePanels.values())el.remove();battlePanels.clear();for(const el of siegePanels.values())el.remove();siegePanels.clear();if(trafficBuffer){gl.deleteBuffer(trafficBuffer.buffer);trafficBuffer=null}if(selectedRouteBuffer){gl.deleteBuffer(selectedRouteBuffer.buffer);selectedRouteBuffer=null}selectedRoutePath=null;deleteMeshBatch(parcelDecorBuffer);parcelDecorBuffer=null;deleteMeshBatch(housingDetailBuffer);housingDetailBuffer=null;deleteMeshBatch(housingProxyBuffer);housingProxyBuffer=null;deleteMeshBatch(farmHedgeBuffer);farmHedgeBuffer=null;parcelSignature='';parcelSurfaceSignature='';trafficRebuildAt=0;for(const el of marchElements.values())el.remove();marchElements.clear();document.querySelectorAll('.tool').forEach(b=>b.classList.remove('active'));$('intro').hidden=false;$('placement').hidden=true;clearGhost();buildingsBuffer=geometryForBuildings();rebuildRoads();cam=startingCamera();clearCountryTints();refreshBorders();dirtyLabels=true;renderNotifications();updateUI()}
 $('reset').onclick=resetGame;
 closeBorderModal();$('notifications-panel').hidden=true;renderNotifications();updateUI();
 const MALAGA_START_BUILDINGS={port:[3,'port'],sawmill:[5,'wood'],mine:[2,'iron'],weaver:[5,'cloth']};
@@ -8837,5 +9621,6 @@ if(pilotLand){
   }
  }
 }
+rebuildWaterways();
 mapImagesRegistered=true;reportMapMaterials();
 requestAnimationFrame(draw);

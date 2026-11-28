@@ -1,5 +1,29 @@
 'use strict';
 
+function wagonVertexShader(source){
+ const input='@location(2) aEdge: f32) -> VertexOutput {';
+ const position='aPos_1 = aPos;\n    aColor_1 = aColor;\n    aEdge_1 = aEdge;';
+ if(!source.includes(input)||!source.includes(position))throw Error('World vertex shader cannot draw wagon instances');
+ return source.replace(input,`@location(2) motion: vec3<f32>, @location(3) pose: vec4<f32>,
+    @location(4) heading: vec4<f32>, @location(5) livery: vec3<f32>) -> VertexOutput {`)
+  .replace(position,`var p = aPos;
+    if (motion.x == 1.0) {
+        let radius = p.xy - motion.yz;
+        let c = cos(pose.w);
+        let s = sin(pose.w);
+        p.x = motion.y + radius.x * c - radius.y * s;
+        p.y = motion.z + radius.x * s + radius.y * c;
+    }
+    if (motion.x == 2.0) {
+        let bend = clamp((0.68 - p.y) / 0.31, 0.0, 1.0) + clamp((0.37 - p.y) / 0.29, 0.0, 1.0) * 0.32;
+        p.x += bend * heading.z * motion.y;
+    }
+    if (motion.x == 3.0 || motion.x == 5.0) { p.y += sin(pose.w + motion.y) * 0.07; }
+    aPos_1 = pose.xyz + vec3<f32>(p.x * heading.x - p.z * heading.y, p.y, p.x * heading.y + p.z * heading.x);
+    aColor_1 = select(aColor, min(vec3<f32>(1.0), aColor * livery / 0.8), motion.x >= 4.0);
+    aEdge_1 = 0.0;`);
+}
+
 // Submit the campaign mesh streams and materials into a Pixi render texture.
 class PixiMapRenderer {
  constructor(renderer, shaders, mapSize, depth, rows, sampleCount=4) {
@@ -15,11 +39,13 @@ class PixiMapRenderer {
   this.attribs=[];this.enabledAttributes=new Set();this.flags=new Set();
   this.units=[];this.groups=new Map();this.pipelines=new Map();this.pages=[];
   this.programs=new Map();this.nextView=1;this.depthWrite=true;this.edge=0;this.treeUnit=2;
+  this.framesInFlight=0;
+  this.skippedFrames=0;
   this.uniformBytes=(Math.floor(Math.max(...Object.values(shaders.uniforms))/4)+1)*16;
   this.constantEdge=this.device.createBuffer({size:4,usage:GPUBufferUsage.VERTEX});
   const visibility=GPUShaderStage.FRAGMENT;
   this.uniformLayout=this.device.createBindGroupLayout({entries:[{binding:0,visibility:visibility|GPUShaderStage.VERTEX,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:this.uniformBytes}}]});
-  this.imageUnits=[0,1,2,3,4,5,6,7,11,12,13,14,15,16]; // 8–10 are the shared samplers.
+  this.imageUnits=[0,1,2,3,4,5,6,7,11,12,13,14,15,16,17]; // 8–10 are the shared samplers.
   this.imageLayout=this.device.createBindGroupLayout({entries:[
    ...this.imageUnits.map(binding=>({binding,visibility,texture:{sampleType:'float'}})),
    ...[8,9,10].map(binding=>({binding,visibility,sampler:{type:'filtering'}}))
@@ -52,7 +78,9 @@ class PixiMapRenderer {
    ['world',false,true,true,'off',false],['world',false,true,true,'write',false],
    ['world',true,true,true,'write',false],['world',false,true,true,'outside',false],
    ['world',false,true,false,'off',true],
-   ['border',false,false,false,'off',false],['forest',false,true,true,'off',true]
+   ['border',false,false,false,'off',false],['forest',false,true,true,'off',true],
+   ['politicalBorder',false,false,false,'off',true],
+   ['world',false,true,true,'off',false,true]
   ];
   await Promise.all(variants.map(async ([name,...state])=>{
    const program=this.createMapProgram(name);
@@ -73,12 +101,15 @@ class PixiMapRenderer {
  vertexAttrib1f(slot,value){this.edge=value}
  createBuffer(){return {gpu:null}}
  bindBuffer(target,buffer){this.boundBuffer=buffer}
- bufferData(target,data){
+ bufferData(target,data,usage){
   const handle=this.boundBuffer;
   if(!data.byteLength)return;
   if(!handle.gpu || handle.gpu.size<data.byteLength){
+   const size=usage===this.DYNAMIC_DRAW
+    ?Math.min(this.device.limits.maxBufferSize,Math.max(data.byteLength,Math.ceil((handle.gpu?.size||0)*1.5/4)*4))
+    :data.byteLength;
    handle.gpu?.destroy();
-   handle.gpu=this.device.createBuffer({size:data.byteLength,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
+   handle.gpu=this.device.createBuffer({size,usage:GPUBufferUsage.VERTEX|GPUBufferUsage.COPY_DST});
   }
   this.device.queue.writeBuffer(handle.gpu,0,data);
  }
@@ -187,19 +218,24 @@ class PixiMapRenderer {
   }],depthStencilAttachment:{view:this.depthTexture.createView(),depthClearValue:1,depthLoadOp:'clear',depthStoreOp:'discard',
    stencilClearValue:0,stencilLoadOp:'clear',stencilStoreOp:'discard'}});
  }
- descriptor(program,weighted,depthTest,depthWrite,stencil,blend){
+ descriptor(program,weighted,depthTest,depthWrite,stencil,blend,wagons=false){
   const attribute=(shaderLocation,offset,format)=>({shaderLocation,offset,format});
   const position=attribute(0,0,'float32x3');
   let buffers;
-  if(program.name==='world')buffers=[
+  if(wagons)buffers=[
+   {arrayStride:36,attributes:[position,attribute(1,12,'float32x3'),attribute(2,24,'float32x3')]},
+   {arrayStride:48,stepMode:'instance',attributes:[attribute(3,0,'float32x4'),attribute(4,16,'float32x4'),attribute(5,32,'float32x3')]}];
+  else if(program.name==='world')buffers=[
    {arrayStride:24,attributes:[position,attribute(1,12,'float32x3')]},
    {arrayStride:4,stepMode:weighted?'vertex':'instance',attributes:[attribute(2,0,'float32')]}];
   else if(program.name==='forest')buffers=[{arrayStride:28,attributes:[position,attribute(1,12,'float32x2'),attribute(2,20,'float32x2')]}];
+  else if(program.name==='politicalBorder')buffers=[{arrayStride:32,attributes:[position,attribute(1,12,'float32x3'),attribute(2,24,'float32x2')]}];
   else buffers=[{arrayStride:28,attributes:[position,attribute(1,12,'float32x3'),attribute(2,24,'float32')]}];
   const face=stencil==='write'?{passOp:'replace'}:stencil==='outside'?{compare:'equal'}:{};
   const target={format:'rgba8unorm'};
   if(blend)target.blend={color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}};
-  return {label:program.name,layout:this.layout,vertex:{module:program.vertex,entryPoint:'main',buffers},
+  if(wagons)this.wagonVertex??=this.device.createShaderModule({label:'Wagon instance vertex',code:wagonVertexShader(this.shaders.programs.world.vert)});
+  return {label:program.name,layout:this.layout,vertex:{module:wagons?this.wagonVertex:program.vertex,entryPoint:'main',buffers},
    fragment:{module:program.fragment,entryPoint:'main',targets:[target]},primitive:{topology:'triangle-list'},
    depthStencil:{format:'depth24plus-stencil8',depthWriteEnabled:depthTest&&depthWrite,depthCompare:depthTest?'less-equal':'always',
     stencilFront:face,stencilBack:face,stencilWriteMask:stencil==='write'?255:0},multisample:{count:this.sampleCount}};
@@ -213,10 +249,11 @@ class PixiMapRenderer {
   }
   return this.pages[index];
  }
- drawArrays(kind,first,count){
+ drawArrays(kind,first,count,wagons=null){
   const program=this.program,world=program.name==='world',weighted=world&&this.enabledAttributes.has(2);
   const stencil=this.flags.has(this.STENCIL_TEST)?(this.stencilMode===this.EQUAL?'outside':'write'):'off';
   const state=[weighted,this.flags.has(this.DEPTH_TEST),this.depthWrite,stencil,this.flags.has(this.BLEND)];
+  if(wagons)state.push(true);
   const key=[program.name,...state].join('|');
   let pipeline=this.pipelines.get(key);
   if(!pipeline){
@@ -230,17 +267,40 @@ class PixiMapRenderer {
   this.pass.setStencilReference(this.reference||0);
   this.pass.setBindGroup(0,page.group,[slot*256]);
   this.pass.setBindGroup(1,this.material());
-  this.pass.setVertexBuffer(0,this.attribs[0].gpu);
-  if(world)this.pass.setVertexBuffer(1,weighted?this.attribs[2].gpu:this.constantEdge);
-  this.pass.draw(count,1,first);
+  this.pass.setVertexBuffer(0,wagons?wagons.mesh.gpu:this.attribs[0].gpu);
+  if(wagons)this.pass.setVertexBuffer(1,wagons.instances.gpu);
+  else if(world)this.pass.setVertexBuffer(1,weighted?this.attribs[2].gpu:this.constantEdge);
+  this.pass.draw(count,wagons?.count??1,first,wagons?.first??0);
+ }
+ canPresent(){
+  if(this.framesInFlight<2)return true;
+  this.skippedFrames++;
+  return false;
+ }
+ discardFrame(){
+  this.encoder=null;
+  this.pass=null;
+  this.flags.clear();
+  this.depthWrite=true;
+  this.enabledAttributes.clear();
+  this.reference=0;
  }
  present(){
   this.pass.end();
+  this.pass=null;
   for(let i=0;i<Math.ceil(this.cursor/256);i++){
    const page=this.pages[i];
    this.device.queue.writeBuffer(page.buffer,0,page.data,0,Math.min(256,this.cursor-i*256)*64);
   }
-  this.device.queue.submit([this.encoder.finish()]);
-  this.renderer.render(this.scene);
+  const commands=this.encoder.finish(),queue=this.device.queue;
+  this.encoder=null;
+  queue.submit([commands]);
+  try{
+   this.renderer.render(this.scene);
+  }finally{
+   this.framesInFlight++;
+   const complete=()=>this.framesInFlight--;
+   queue.onSubmittedWorkDone().then(complete,complete);
+  }
  }
 }

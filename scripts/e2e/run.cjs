@@ -37,12 +37,345 @@ async function verifyBorderPaint(page){
  if(!visible||black)throw Error('Слой границ: видимых пикселей '+visible+', непрозрачных чёрных '+black);
 }
 
+async function verifyRiverOutlets(page){
+ const result=await page.evaluate(()=>{
+  const lines=waterwayLines();
+  const berths=state.regions.flatMap(r=>r.slots).map(slot=>portWaterCell(slot)).filter(berth=>berth?.river);
+  const failed=[];
+  for(const [system,river] of riverMap.systems.entries()){
+   const outlet=river.sea?.at(-1);
+   const exits=lines.some(([,id,,,estuary])=>id===system&&estuary);
+   const berth=berths.find(point=>riverSailing(point)?.segment.system===system);
+   const course=outlet&&berth&&navalCourse(berth,outlet);
+   if(!exits||!course||!openWater(course.at(-1))||course.slice(1).some((point,i)=>!waterSegment(course[i],point)))failed.push(system);
+  }
+  return {failed,hasBanks:riverBankBuffer.count>0,total:riverMap.systems.length};
+ });
+ if(result.failed.length||!result.hasBanks)throw Error('Разрыв судоходной реки или устья: '+result.failed.join(', '));
+ console.log('Реки: проверен выход к морю для '+result.total+' речных систем.');
+}
+
+async function verifyRiverTradeRoute(page){
+ await page.evaluate(async()=>{
+  const playing=Object.getOwnPropertyDescriptor(gameShell,'playing');
+  Object.defineProperty(gameShell,'playing',{configurable:true,value:false});
+  const port=state.regions.flatMap(region=>region.slots).map(slot=>portWaterCell(slot)).find(berth=>berth?.river);
+  const system=riverSailing(port).segment.system;
+  const path=navalCourse(port,riverMap.systems[system].sea.at(-1));
+  const seaEnd=routeLength(path);
+  markSeaLeg(path,0,seaEnd);
+  const ship={owner:'you',kind:'botSeaTrade',mode:'sea',good:'grain',amount:10,path,
+   elapsed:0,duration:journeyDuration(path),seaStart:0,seaEnd};
+  const camera={x:cam.x,z:cam.z,scale:cam.scale};
+  state.economy.shipments.push(ship);
+  try{
+   cam.x=port.x;cam.z=port.z;cam.scale=.022;
+   for(let i=0;i<24&&!cargoElements.has(ship);i++)await new Promise(requestAnimationFrame);
+   const marker=cargoElements.get(ship);
+   if(!marker)throw Error('Торговый корабль на реке отсутствует');
+   marker.click();
+   await window.__e2eRenderedFrame();
+   if(selectedRoutePath!==path||!selectedRouteBuffer?.count)throw Error('Путь корабля на реке отсутствует');
+   cam.scale=MIN_MAP_ZOOM;
+   for(let i=0;i<120&&mapView().opacity<1;i++)await new Promise(requestAnimationFrame);
+   if(diplomaticAtlas.lastShipmentPath!==path)throw Error('Путь корабля отсутствует на обзорной карте');
+  }finally{
+   $('cargo-close').click();
+   Object.assign(cam,camera);
+   state.economy.shipments=state.economy.shipments.filter(item=>item!==ship);
+   if(playing)Object.defineProperty(gameShell,'playing',playing);
+   else delete gameShell.playing;
+  }
+ });
+}
+
+async function verifyVassalFeudDelay(page){
+ await page.evaluate(()=>{
+  const a={id:1,owner:'you',lands:[1],foundedAt:0,surname:'Первый'};
+  const b={id:2,owner:'you',lands:[2],foundedAt:100,surname:'Второй'};
+  const point={x:10,z:10};
+  const lands=[{id:1,vassalId:1,owner:'you',adj:[2],slots:[{x:0,z:0}]},
+   {id:2,vassalId:2,owner:'you',adj:[1],slots:[point],city:'Город',buildings:[]}];
+  const army={owner:'you',vassalId:1,generalSlot:1,troops:200,location:{point}};
+  const fixture={regions:lands,capitalId:3,vassals:new Map([[a.id,a],[b.id,b]]),
+   economy:{seconds:0},fieldArmies:[army],network:{hubKeys:new Map([[2,2]])},
+   roadNodeLocation:()=>({point})};
+  const review=seconds=>{
+   fixture.economy.seconds=seconds;
+   updateVassalRivalries(fixture,seconds);
+   vassalFeud(fixture,a,'you',[lands[0]]);
+  };
+  const graceEnds=b.foundedAt+VASSAL_FEUD_GRACE;
+  review(graceEnds-1);
+  if(fixture.vassalRivalries.size||fixture.vassalFeuds?.size)throw Error('Новый вассал атакован во время защиты');
+  review(graceEnds);
+  review(graceEnds+VASSAL_FEUD_ESCALATION/2);
+  if(fixture.notifications?.length!==1||fixture.vassalFeuds?.size)throw Error('Нет раннего предупреждения о споре');
+  review(graceEnds+VASSAL_FEUD_ESCALATION-1);
+  if(fixture.vassalFeuds?.size)throw Error('Спор слишком рано приводит к войне');
+  review(graceEnds+VASSAL_FEUD_ESCALATION);
+  if(fixture.vassalFeuds?.get(2)?.attackerId!==1||fixture.notifications.length!==2)throw Error('Накопившийся спор не переходит в войну');
+ });
+}
+
+async function verifyRenderBackpressure(page){
+ await page.evaluate(async()=>{
+  const queue=gl.device.queue,waitForGPU=queue.onSubmittedWorkDone;
+  const originalPresent=gl.present;
+  const skipped=gl.skippedFrames,simSteps=simTimings.count;
+  let release,submitted=0;
+  const blocked=new Promise(resolve=>{release=resolve});
+  queue.onSubmittedWorkDone=()=>blocked;
+  gl.present=function(){
+   submitted++;
+   return originalPresent.call(this);
+  };
+  const wait=async check=>{
+   const deadline=performance.now()+3500;
+   while(!check()&&performance.now()<deadline)await new Promise(requestAnimationFrame);
+   return check();
+  };
+  try{
+   if(!await wait(()=>gl.skippedFrames>skipped&&simTimings.count>simSteps))
+    throw Error('Задержка GPU остановила симуляцию или не ограничила очередь');
+   if(gl.framesInFlight!==2||submitted!==2)throw Error('В очереди GPU больше двух кадров');
+   queue.onSubmittedWorkDone=waitForGPU;
+   release();
+   if(!await wait(()=>submitted>2))throw Error('Кадры не возобновились после задержки GPU');
+  }finally{
+   queue.onSubmittedWorkDone=waitForGPU;
+   gl.present=originalPresent;
+   release();
+  }
+ });
+}
+
+async function verifyTerrainCulling(page){
+ const result=await page.evaluate(async()=>{
+  const camera={...cam};
+  const home=state.regions.find(region=>region.id===state.capitalId).slots[0];
+  const terrain=new Map([[basemap.land.buffer,basemap.land.count],
+   ...[...regionMeshes.values()].map(mesh=>[mesh.buffer,mesh.count])]);
+  const total=[...terrain.values()].reduce((sum,count)=>sum+count,0);
+  const draw=gl.drawArrays;
+  let submitted=0;
+  try{
+   cam.x=home.x;cam.z=home.z;cam.scale=.028;cam.yaw=.63;
+   gl.drawArrays=function(kind,first,count,instances){
+    const available=terrain.get(this.attribs[0]);
+    if(available!==undefined){
+     if(first+count>available)throw Error('Тайл вышел за пределы буфера рельефа');
+     submitted+=count;
+    }
+    return draw.call(this,kind,first,count,instances);
+   };
+   await window.__e2eRenderedFrame();
+   return {total,submitted,tiles:basemap.tiles.length};
+  }finally{
+   gl.drawArrays=draw;
+   Object.assign(cam,camera);
+   dirtyLabels=true;
+  }
+ });
+ if(result.tiles<2||result.submitted<=0||result.submitted>=result.total*.65)
+  throw Error('Камера отправляет слишком много рельефа: '+JSON.stringify(result));
+ console.log('Тайлы рельефа при близком зуме: '+result.submitted+' из '+result.total+' вершин.');
+}
+
+async function verifyForestLOD(page){
+ await page.waitForFunction(()=>forestAsset.ready&&woodlandAsset.ready&&forestSpruceAsset.ready);
+ const result=await page.evaluate(async()=>{
+  const camera={...cam},home=state.regions.find(region=>region.id===state.capitalId).slots[0];
+  const meshes=[coastalWoods?.crowns,forestSpriteBuffer,forestSpriteBuffer.spruce,
+   forestSpriteBuffer.floodplain,forestSpriteBuffer.scrub].filter(mesh=>mesh?.detailCount);
+  const byBuffer=new Map(meshes.map(mesh=>[mesh.buffer,mesh]));
+  const original=gl.drawArrays;
+  const samples=[];
+  let counts;
+  try{
+   gl.drawArrays=function(kind,first,count,instances){
+    const mesh=byBuffer.get(this.attribs[0]);
+    if(this.program.name==='forest'&&mesh){
+     if(first+count>mesh.count)throw Error('Некорректный диапазон вершин леса');
+     counts[first<mesh.detailCount?'trees':'groves']+=count;
+    }
+    return original.call(this,kind,first,count,instances);
+   };
+   for(const size of [10,6.9,5]){
+    Object.assign(cam,{x:home.x,z:home.z,scale:size*2/canvas.clientHeight,yaw:.43});
+    counts={trees:0,groves:0};
+    await window.__e2eRenderedFrame();
+    samples.push(counts);
+   }
+   return {samples,total:meshes.reduce((sum,mesh)=>sum+mesh.detailCount,0)};
+  }finally{
+   gl.drawArrays=original;
+   Object.assign(cam,camera);
+   dirtyLabels=true;
+  }
+ });
+ const [near,blend,far]=result.samples;
+ if(!near.trees||near.trees>=result.total*.65||near.groves||!blend.trees||!blend.groves||far.trees||!far.groves||far.groves>=result.total*.55)
+  throw Error('Уровни детализации леса: '+JSON.stringify(result));
+ console.log('Лес: '+near.trees+' ближних вершин и '+far.groves+' вершин дальних групп из '+result.total+'.');
+}
+
+async function verifySettlementLOD(page){
+ const result=await page.evaluate(async()=>{
+  const camera={...cam},home=state.regions.find(region=>region.id===state.capitalId).slots[0];
+  const detailed=new Set([...housingDetailBuffer.chunks.values()].map(mesh=>mesh.buffer));
+  const proxies=new Set([...housingProxyBuffer.chunks.values()].map(mesh=>mesh.buffer));
+  const original=gl.drawArrays;
+  const samples=[];
+  let counts;
+  try{
+   gl.drawArrays=function(kind,first,count,instances){
+    const buffer=this.attribs[0];
+    if(detailed.has(buffer))counts.detailed+=count;
+    if(proxies.has(buffer))counts.proxies+=count;
+    return original.call(this,kind,first,count,instances);
+   };
+   for(const size of [10,7.7,6]){
+    Object.assign(cam,{x:home.x,z:home.z,scale:size*2/canvas.clientHeight,yaw:.43});
+    counts={detailed:0,proxies:0};
+    await window.__e2eRenderedFrame();
+    samples.push(counts);
+   }
+   return {samples,detailed:housingDetailBuffer.count,proxies:housingProxyBuffer.count};
+  }finally{
+   gl.drawArrays=original;
+   Object.assign(cam,camera);
+   dirtyLabels=true;
+  }
+ });
+ const [near,blend,far]=result.samples;
+ if(!near.detailed||near.detailed>=result.detailed*.7||near.proxies||!blend.detailed||!blend.proxies||
+  far.detailed||!far.proxies||result.proxies>=result.detailed*.35)
+  throw Error('Уровни детализации поселений: '+JSON.stringify(result));
+ console.log('Поселения: '+result.proxies+' упрощённых вершин вместо '+result.detailed+'.');
+}
+
+async function verifyAtlasCache(page){
+ await page.waitForFunction(()=>diplomaticAtlas.ready&&diplomaticAtlas.woods);
+ await page.evaluate(()=>{
+  const atlas=diplomaticAtlas,originalView=mapView(),app=atlas.canvas.parentElement;
+  const paint=atlas.politics(state.regions,atlasBorderEdges,FACTION_COLORS);
+  try{
+   atlas.surfaceFor(paint,true);
+   const layers=atlas.surface;
+   const view={...originalView,...atlas.center,scale:.06,opacity:0};
+   atlas.updateSheet(view);
+   if(atlas.sheet||app.style.getPropertyValue('--map-sheet')||atlas.edge.hasAttribute('d'))
+    throw Error('Клип листа остался на зуме, где край вне экрана');
+   atlas.updateSheet({...view,scale:.001,opacity:1});
+   if(!atlas.sheet||!app.style.getPropertyValue('--map-sheet')||!atlas.edge.getAttribute('d'))
+    throw Error('Клип листа не вернулся при отдалении');
+   atlas.surfaceFor(paint,true);
+   if(atlas.surface!==layers)throw Error('Движение камеры сбросило кэш слоёв атласа');
+   atlas.surfaceFor(paint,false);
+   if(atlas.surface===layers||atlas.surface.woods)throw Error('Смена настройки леса не обновила атлас');
+   const regions=state.regions.slice(),region=regions.findIndex(r=>r.owner==='neutral');
+   regions[region]={...regions[region],owner:'you'};
+   const changed=atlas.politics(regions,atlasBorderEdges,FACTION_COLORS);
+   atlas.surfaceFor(changed,false);
+   if(atlas.surface.paint===paint)throw Error('Переход владения не обновил атлас');
+  }finally{
+   atlas.updateSheet(originalView);
+   atlas.lastPaint=null;
+  }
+ });
+}
+
+async function verifyWagonInstances(page){
+ await page.evaluate(async()=>{
+  const home=state.regions.find(region=>region.id===state.capitalId).slots[0],camera={...cam};
+  const draw=gl.drawArrays,upload=gl.bufferData;
+  const playing=Object.getOwnPropertyDescriptor(gameShell,'playing'),clock=simClock;
+  const shipments=state.economy.shipments;
+  const ships=['grain','grain','wood'].map((good,i)=>{
+   const x=home.x+i*5,z=home.z+7,path=[{x,z},{x:x+12,z}];
+   return {owner:i===1?'bot':'you',kind:'export',mode:'land',good,amount:14,path,elapsed:0,duration:journeyDuration(path),value:20};
+  });
+  const draws=[];
+  let poses;
+  Object.defineProperty(gameShell,'playing',{configurable:true,value:false});
+  simClock=0;
+  state.economy.shipments=ships;
+  try{
+   Object.assign(cam,{x:home.x,z:home.z,scale:.045});
+   gl.drawArrays=function(kind,first,count,instances){
+    if(instances)draws.push(instances);
+    return draw.call(this,kind,first,count,instances);
+   };
+   gl.bufferData=function(target,data,usage){
+    if(this.boundBuffer===wagonInstances)poses=data;
+    return upload.call(this,target,data,usage);
+   };
+   await window.__e2eRenderedFrame();
+   const shared=draws.find(call=>call.count===2);
+   if(!shared||draws.length!==2||!poses||poses.length!==36)throw Error('Обозы не объединены по модели');
+   if(poses[shared.first*12+8]===poses[(shared.first+1)*12+8])throw Error('Обозы потеряли цвета держав');
+   const cached=new Set(draws.map(call=>call.mesh));
+   const firstX=poses[shared.first*12];
+   ships[0].elapsed=.25;
+   draws.length=0;
+   await window.__e2eRenderedFrame();
+   if(draws.some(call=>!cached.has(call.mesh))||!poses.some((value,i)=>i%12===0&&Math.abs(value-firstX-3)<.003))
+    throw Error('Движение обоза не обновило экземпляр общей модели');
+  }finally{
+   gl.drawArrays=draw;gl.bufferData=upload;
+   state.economy.shipments=shipments;simClock=clock;
+   if(playing)Object.defineProperty(gameShell,'playing',playing);
+   else delete gameShell.playing;
+   Object.assign(cam,camera);dirtyLabels=true;
+  }
+ });
+}
+
+async function verifyHistoricalIdentitiesAndPatrol(page){
+ const result=await page.evaluate(()=>{
+  const regions=state.regions,capitalId=state.capitalId;
+  const capital=regions.find(region=>region.id===capitalId);
+  const ship={owner:'you',hull:100,point:{x:-10,z:0},elapsed:0};
+  const fixture={regions,capitalId,factions:{},warships:[ship],economy:{shipments:[],seconds:0},
+   navalPath:(from,to)=>[from,to],armyMoves:[],fieldArmies:[]};
+  const unnamed=generalCommanderName(fixture,'you',1)===null;
+  const general=reinforceGeneral(fixture,'you',1,100);
+  const named=general.commanderName===historicalCommanderPool(capital)[0];
+  orderWarship(fixture,ship,{x:0,z:0});
+  let previous=ship.point,maxStep=0,turns=0;
+  for(let tick=0;tick<12;tick++){
+   stepWarships(fixture,1);
+   if(ship.visualMotion?.length>1)turns++;
+   for(let frame=0;frame<=30;frame++){
+    const {point}=navalVisualPose(ship,frame/30);
+    maxStep=Math.max(maxStep,distance(point,previous));
+    previous=point;
+   }
+  }
+  return {unnamed,named,maxStep,turns,allArms:regions.every(region=>historicalShield(region).includes('historical-shield'))};
+ });
+ if(!result.unnamed||!result.named||!result.allArms||!result.turns||result.maxStep>1.001)
+  throw Error('Гербы, имя при наборе армии или плавность патруля: '+JSON.stringify(result));
+}
+
 async function verifyPoliticalBorders(page){
  const readBorder=(stage=null)=>page.evaluate(async stage=>{
-  for(let frame=0;frame<120;frame++){
-   await new Promise(requestAnimationFrame);
-   const view=mapView();
-   if(!stage||stage==='tilt'&&view.atlasPitch>.25&&view.opacity===0||stage==='blend'&&view.opacity>.15&&view.opacity<.85)break;
+  const present=gl.present;
+  let submitted=false;
+  gl.present=function(){
+   present.call(this);
+   submitted=true;
+  };
+  try{
+   for(let frame=0;frame<120;frame++){
+    submitted=false;
+    await new Promise(requestAnimationFrame);
+    const view=mapView();
+    if(submitted&&(!stage||stage==='tilt'&&view.atlasPitch>.25&&view.opacity===0||stage==='blend'&&view.opacity>.15&&view.opacity<.85))break;
+   }
+  }finally{
+   gl.present=present;
   }
   const path=document.querySelector('#vassal-border-layer clipPath path');
   const region=state.regions.find(r=>path.parentElement.id.endsWith('-'+r.id));
@@ -126,7 +459,7 @@ async function verifyBuildingMarkers(page){
  await page.waitForTimeout(200);
  await page.keyboard.up('KeyD');
  const moved=await page.evaluate(async ({region,slot,x})=>{
-  await new Promise(requestAnimationFrame);
+  await window.__e2eRenderedFrame();
   const el=document.querySelector('.slot-marker[data-region="'+region+'"][data-slot="'+slot+'"]');
   const land=state.regions.find(r=>String(r.id)===region);
   const plot=land.slots.find(s=>String(s.id)===slot);
@@ -168,7 +501,7 @@ async function verifyArmyOrders(page){
   cam.x=hub.point.x;cam.z=hub.point.z;cam.scale=.033;cam.yaw=0;cam.tilt=DEFAULT_CAMERA_TILT;dirtyLabels=true;
  });
  const box=await page.evaluate(async()=>{
-  await new Promise(requestAnimationFrame);
+  await window.__e2eRenderedFrame();
   const badges=[...marchElements.values()].filter(el=>el.armyItem.owner==='you'&&!el.hidden).map(el=>el.armyItem.badge);
   const xs=badges.map(p=>p.x),ys=badges.map(p=>p.y);
   const world=document.getElementById('world');
@@ -234,7 +567,7 @@ async function verifyArmyOrders(page){
   throw Error('Приказ в точку '+JSON.stringify(target)+' · '+JSON.stringify(await destinations()),{cause:error});
  });
  if(displacement(origin,await positions())>.01)throw Error('Первый приказ сдвинул отряд мгновенно');
- await page.evaluate(async()=>{simClock=.9;await new Promise(requestAnimationFrame)});
+ await page.evaluate(async()=>{simClock=.9;await window.__e2eRenderedFrame()});
  const advanced=await positions(),movement=displacement(origin,advanced);
  if(Math.abs(movement-2.4)>.01)throw Error('Неверная скорость движения между тиками: '+movement);
  for(let i=0;i<8;i++)await page.mouse.click(target.x,target.y);
@@ -314,6 +647,19 @@ async function verifyVictoryRings(page){
  const page=await browser.newPage();
  await page.addInitScript(()=>{
   window.__e2eAudioStarts=0;
+  window.__e2eRenderedFrame=()=>new Promise((resolve,reject)=>{
+   const present=gl.present;
+   const timer=setTimeout(()=>{
+    gl.present=present;
+    reject(Error('Карта не отправила кадр'));
+   },3500);
+   gl.present=function(){
+    present.call(this);
+    gl.present=present;
+    clearTimeout(timer);
+    resolve();
+   };
+  });
   const start=AudioBufferSourceNode.prototype.start;
   AudioBufferSourceNode.prototype.start=function(...args){
    const result=start.apply(this,args);
@@ -368,12 +714,17 @@ async function verifyVictoryRings(page){
     const preview=document.createElement('canvas');
     preview.width=48;preview.height=27;
     const context=preview.getContext('2d');
-    await new Promise(resolve=>requestAnimationFrame(resolve));
-    context.drawImage(document.getElementById('world'),0,0,preview.width,preview.height);
-    const pixels=context.getImageData(0,0,preview.width,preview.height).data;
     let visible=0;
-    for(let i=0;i<pixels.length;i+=4){
-     if(Math.max(pixels[i],pixels[i+1],pixels[i+2])>=42)visible++;
+    const deadline=performance.now()+3000;
+    while(visible<32&&performance.now()<deadline){
+     await window.__e2eRenderedFrame();
+     context.clearRect(0,0,preview.width,preview.height);
+     context.drawImage(document.getElementById('world'),0,0,preview.width,preview.height);
+     const pixels=context.getImageData(0,0,preview.width,preview.height).data;
+     visible=0;
+     for(let i=0;i<pixels.length;i+=4){
+      if(Math.max(pixels[i],pixels[i+1],pixels[i+2])>=42)visible++;
+     }
     }
     return visible;
    });
@@ -398,6 +749,16 @@ async function verifyVictoryRings(page){
     sim='идёт ('+dateBefore+' → '+dateAfter+')';
     await verifyBorderPaint(page);
     await verifyPoliticalBorders(page);
+    await verifyRiverOutlets(page);
+    await verifyRiverTradeRoute(page);
+    await verifyVassalFeudDelay(page);
+    await verifyRenderBackpressure(page);
+    await verifyTerrainCulling(page);
+    await verifyForestLOD(page);
+    await verifySettlementLOD(page);
+    await verifyAtlasCache(page);
+    await verifyWagonInstances(page);
+    await verifyHistoricalIdentitiesAndPatrol(page);
     console.log('Контуры держав видны, местность не перекрыта при перетаскивании, зуме и повороте.');
     await page.keyboard.press('Home');
     await verifyBuildingMarkers(page);
@@ -474,6 +835,32 @@ async function verifyVictoryRings(page){
       throw Error('Атлас не открылся после отдаления · '+JSON.stringify(view),{cause:error});
      });
     await page.waitForTimeout(400);
+    const desk=await page.evaluate(()=>{
+     const app=document.getElementById('app');
+     const [left,top,right,bottom]=sheetBounds;
+     const originalX=cam.x,originalZ=cam.z;
+     cam.x=(left+right)/2;
+     cam.z=(top+bottom)/2;
+     dirtyLabels=true;
+     return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
+      for(let y=55;y<innerHeight-55;y+=20)for(let x=8;x<innerWidth-8;x+=20){
+       if(document.elementFromPoint(x,y)===app){
+        resolve({x,y,dx:x<innerWidth/2?64:-64,dy:y<innerHeight/2?32:-32,cameraX:cam.x,cameraZ:cam.z,originalX,originalZ});
+        return;
+       }
+      }
+      resolve(null);
+     })));
+    });
+    if(!desk)throw Error('Не найдено открытое место на столе рядом с атласом');
+    await page.mouse.move(desk.x,desk.y);
+    await page.mouse.down({button:'middle'});
+    try{
+     await page.mouse.move(desk.x+desk.dx,desk.y+desk.dy,{steps:8});
+     const moved=await page.evaluate(({cameraX,cameraZ})=>Math.hypot(cam.x-cameraX,cam.z-cameraZ),desk);
+     if(moved<1)throw Error('Камера не двигается при перетаскивании с области стола');
+    }finally{await page.mouse.up({button:'middle'})}
+    await page.evaluate(({originalX,originalZ})=>{cam.x=originalX;cam.z=originalZ;dirtyLabels=true},desk);
     const ov1=await page.evaluate(()=>({realms:document.querySelectorAll('#labels .label-realms > *').length,sea:document.querySelectorAll('#labels .sea-label').length,scale:document.getElementById('atlas-scale')?.textContent||''}));
     for(let i=0;i<8;i++){await moveToWorld();await page.mouse.wheel(0,i%2?-160:160);await page.waitForTimeout(60);}
     await page.waitForTimeout(400);

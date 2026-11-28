@@ -12,6 +12,9 @@ class DiplomaticAtlas{
   this.context=canvas.getContext('2d');
   this.map=DIPLOMATIC_ATLAS_MAPS[map]||DIPLOMATIC_ATLAS_MAPS.baltic;
   this.extent=CAMPAIGN_RIVERS.backdrop.extent;
+  const [left,top,right,bottom]=this.extent;
+  this.riverExtent=new Path2D();
+  this.riverExtent.rect(left,top,right-left,bottom-top);
   this.edge=document.querySelector("#map-paper-edge path");
   const boxes=regions.flatMap(region=>region.bounds);
   this.bounds=[Math.min(...boxes.map(b=>b[0])),Math.min(...boxes.map(b=>b[1])),
@@ -20,11 +23,6 @@ class DiplomaticAtlas{
   this.center={x:(x0+x1)/2,z:(z0+z1)/2};
   this.shapes=new Map(regions.map(region=>[region.id,recapPolygons(region.polys)]));
   this.riverLines=new Path2D();
-  for(const [,,rank,points] of CAMPAIGN_RIVERS.lines){
-   if(rank>5)continue;
-   this.riverLines.moveTo(...points[0]);
-   for(const point of points.slice(1))this.riverLines.lineTo(...point);
-  }
   this.ready=false;
   const load=name=>new Promise((resolve,reject)=>{
    const image=new Image();
@@ -36,6 +34,14 @@ class DiplomaticAtlas{
    this.base=base;this.ready=!!this.context;
    return this.ready;
   },()=>false);
+ }
+ setRivers(lines){
+  this.riverLines=new Path2D();
+  for(const [,,rank,points] of lines){
+   if(rank>5)continue;
+   this.riverLines.moveTo(...points[0]);
+   for(let i=1;i<points.length;i++)this.riverLines.lineTo(...points[i]);
+  }
  }
  area(width,height){
   const side=Math.max(12,Math.min(width*.055,height*.105));
@@ -57,6 +63,21 @@ class DiplomaticAtlas{
    const dx=px-x,dz=pz-z;
    return [width*.5+(c*dx-s*dz)*zoom,height*.5+((s*dx+c*dz)*tilt-y*(1-opacity))*zoom/norm];
   });
+  // Keep the clip only when the paper edge or its shadow can be seen.
+  const margin=24;
+  const edgeCanBeSeen=this.sheetPoints.some(([ax,ay],i,points)=>{
+   const [bx,by]=points[(i+1)%points.length];
+   return Math.min(ax,bx)<=width+margin&&Math.max(ax,bx)>=-margin&&
+    Math.min(ay,by)<=height+margin&&Math.max(ay,by)>=-margin;
+  });
+  if(!edgeCanBeSeen&&this.contains(width*.5,height*.5)){
+   if(this.sheet!==null){
+    this.sheet=null;
+    this.edge.removeAttribute('d');
+    this.canvas.parentElement.style.removeProperty('--map-sheet');
+   }
+   return;
+  }
   const path='M'+this.sheetPoints.map(([x,y])=>x.toFixed(1)+' '+y.toFixed(1)).join(' L')+' Z';
   this.sheet=new Path2D(path);
   this.edge.setAttribute('d',path);
@@ -108,8 +129,40 @@ class DiplomaticAtlas{
   const inks=[...fills].map(([owner,path])=>[ATLAS_INK[owner]||paletteCss(colors[owner]||[.52,.45,.39]),path]);
   return this.paint={signature,inks,territory,inside,frontiers};
  }
- render(view,regions,neighbors,colors,selected,routes,showTrees){
-  const {width,height,scale,tilt,norm,yaw,x,z,paper}=view;
+ surfaceFor(paint,showTrees){
+  const woods=showTrees?this.woods:null;
+  if(this.surface?.paint===paint&&this.surface.woods===woods)return this.surface.canvas;
+  const canvas=this.surface?.canvas||document.createElement('canvas');
+  canvas.width=this.base.naturalWidth;
+  canvas.height=this.base.naturalHeight;
+  const ctx=canvas.getContext('2d');
+  const [x0,z0,x1,z1]=this.extent,dw=x1-x0,dh=z1-z0;
+  const scaleX=canvas.width/dw,scaleZ=canvas.height/dh;
+  ctx.setTransform(scaleX,0,0,scaleZ,-x0*scaleX,-z0*scaleZ);
+  ctx.drawImage(this.base,x0,z0,dw,dh);
+  ctx.globalAlpha=.62;
+  for(const [ink,path] of paint.inks){ctx.fillStyle=ink;ctx.fill(path,'evenodd')}
+  ctx.globalAlpha=1;
+  if(woods){
+   ctx.save();
+   ctx.clip(paint.territory,'evenodd');
+   ctx.drawImage(woods,x0,z0,dw,dh);
+   ctx.restore();
+  }
+  this.surface={paint,woods,canvas};
+  return canvas;
+ }
+ prepareSurface(regions,neighbors,colors,showTrees){
+  if(this.surfaceJob)return;
+  const paint=this.politics(regions,neighbors,colors);
+  if(this.surface?.paint===paint&&this.surface.woods===(showTrees?this.woods:null))return;
+  this.surfaceJob=requestIdleCallback(()=>{
+   this.surfaceJob=0;
+   this.surfaceFor(this.politics(regions,neighbors,colors),showTrees);
+  },{timeout:160});
+ }
+ render(view,regions,neighbors,colors,selected,routes,showTrees,shipmentPath){
+  const {width,height,scale,tilt,norm,yaw,x,z,paper,opacity}=view;
   const ratio=Math.min(1.65,devicePixelRatio||1);
   const w=Math.round(width*ratio),h=Math.round(height*ratio);
   if(!w||!h)return;
@@ -118,36 +171,25 @@ class DiplomaticAtlas{
    this.lastPaint=null;
   }
   const paint=this.politics(regions,neighbors,colors);
-  const key=[paint.signature,selected?.id,scale,tilt,yaw,x,z,paper,routes.length,showTrees].join('|');
-  if(key===this.lastPaint&&routes.every((route,i)=>route===this.lastRoutes[i]))return;
-  this.lastPaint=key;this.lastRoutes=routes;
+  const key=[paint.signature,selected?.id,scale,tilt,yaw,x,z,paper,opacity,routes.length,showTrees].join('|');
+  if(key===this.lastPaint&&shipmentPath===this.lastShipmentPath&&routes.every((route,i)=>route===this.lastRoutes[i]))return;
+  this.lastPaint=key;this.lastRoutes=routes;this.lastShipmentPath=shipmentPath;
   const ctx=this.context;
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,w,h);
   ctx.setTransform(ratio,0,0,ratio,0,0);
   ctx.save();
-  ctx.clip(this.sheet);
+  if(this.sheet)ctx.clip(this.sheet);
   ctx.fillStyle='#a69778';
-  ctx.fill(this.sheet);
+  ctx.fillRect(0,0,width,height);
   const zoom=height*scale/2,vertical=zoom*tilt/norm,c=Math.cos(yaw),s=Math.sin(yaw);
   ctx.transform(c*zoom,s*vertical,-s*zoom,c*vertical,width*.5-zoom*(c*x-s*z),height*.5-vertical*(s*x+c*z));
   const [x0,z0,x1,z1]=this.extent,dw=x1-x0,dh=z1-z0;
-  ctx.drawImage(this.base,x0,z0,dw,dh);
-  ctx.globalAlpha=.62;
-  for(const [ink,path] of paint.inks){ctx.fillStyle=ink;ctx.fill(path,'evenodd')}
-  ctx.globalAlpha=1;
-  if(showTrees&&this.woods){
-   ctx.save();
-   ctx.clip(paint.territory,'evenodd');
-   ctx.drawImage(this.woods,x0,z0,dw,dh);
-   ctx.restore();
-  }
+  ctx.drawImage(this.surfaceFor(paint,showTrees),x0,z0,dw,dh);
   ctx.lineJoin='round';ctx.lineCap='round';
   const stroke=(path,color,weight)=>{ctx.strokeStyle=color;ctx.lineWidth=weight/zoom;ctx.stroke(path)};
   ctx.save();
-  const riverExtent=new Path2D();
-  riverExtent.rect(x0,z0,dw,dh);
-  ctx.clip(riverExtent);
+  ctx.clip(this.riverExtent);
   stroke(this.riverLines,'rgba(46,84,97,.74)',1.05);
   ctx.restore();
   stroke(paint.inside,'rgba(110,92,72,.38)',.8);
@@ -158,12 +200,13 @@ class DiplomaticAtlas{
    stroke(outline,'rgba(62,43,23,.83)',3.6);
    stroke(outline,'#F1CA72',1.85);
   }
-  for(const route of routes){
+  for(const route of shipmentPath?[...routes,shipmentPath]:routes){
    const path=new Path2D();
    path.moveTo(route[0].x,route[0].z);
    for(const point of route.slice(1))path.lineTo(point.x,point.z);
-   stroke(path,'rgba(28,51,32,.9)',3.4);
-   stroke(path,'#B5CF77',1.65);
+   const shipment=route===shipmentPath;
+   stroke(path,shipment?'rgba(48,36,17,.9)':'rgba(28,51,32,.9)',3.4);
+   stroke(path,shipment?'#FFCF66':'#B5CF77',1.65);
   }
   ctx.restore();
  }

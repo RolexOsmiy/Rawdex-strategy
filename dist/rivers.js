@@ -2,33 +2,52 @@
 
 const RIVER_PORT_REACH=16;
 const BRIDGE_DEFENSE=.25;
+function riverWidth(rank){return rank<=2?2.8:rank<=4?2.35:rank===5?1.85:1.24}
 
 class RiverMap{
  constructor({lines,mouths,sea=[]}){
-  this.lines=lines;
+  this.lines=[];
   this.seas=sea.map(rings=>({rings,
    left:Math.min(...rings[0].map(p=>p[0])),right:Math.max(...rings[0].map(p=>p[0])),
    top:Math.min(...rings[0].map(p=>p[1])),bottom:Math.max(...rings[0].map(p=>p[1]))}));
-  this.systems=mouths.map(([x,z])=>({mouth:{x,z},nodes:new Map(),outlet:null}));
+  this.systems=mouths.map(([x,z])=>({mouth:{x,z},nodes:new Map(),outlet:null,paths:[],grid:new Map()}));
   this.buckets=new Map();
   this.openingBuckets=new Map();
   this.bridgeBuckets=new Map();
   this.bridges=[];
   for(const [name,system,rank,points] of lines){
    const channel=this.systems[system];
-   const width=rank<=2?2.8:rank<=4?2.35:rank===5?1.85:1.24;
-   const path=points.map(([x,z],i)=>channel?this.node(channel,x,z,i===0||i===points.length-1):{x,z});
+   if(!channel||points.length<2)continue;
+   const path=points.map(([x,z])=>this.node(channel,x,z));
+   channel.paths.push({name,system,rank,path});
    for(let i=1;i<path.length;i++){
     const a=path[i-1],b=path[i];
     if(a===b)continue;
-    const segment={a,b,name,system,width};
-    this.index(this.buckets,a,b,segment);
-    if(channel){const length=this.distance(a,b);a.links.set(b,length);b.links.set(a,length)}
+    this.index(channel.grid,a,b,{a,b,path});
+    this.link(a,b);
    }
   }
-  for(const channel of this.systems)this.traceOutlet(channel);
+  for(const channel of this.systems){
+   this.stitchJunctions(channel);
+   this.traceOutlet(channel);
+   for(const {name,system,rank,path} of channel.paths){
+    if(Number.isFinite(path[0].toMouth))this.addLine(name,system,rank,path);
+   }
+  }
  }
  distance(a,b){return Math.hypot(a.x-b.x,a.z-b.z)}
+ link(a,b){
+  if(a===b)return;
+  const length=this.distance(a,b);
+  a.links.set(b,length);b.links.set(a,length);
+ }
+ addLine(name,system,rank,path){
+  this.lines.push([name,system,rank,path.map(({x,z})=>[x,z])]);
+  for(let i=1;i<path.length;i++){
+   const a=path[i-1],b=path[i];
+   if(a!==b)this.index(this.buckets,a,b,{a,b,name,system,width:riverWidth(rank)});
+  }
+ }
  index(buckets,a,b,item){
   for(let x=Math.floor(Math.min(a.x,b.x)/16);x<=Math.floor(Math.max(a.x,b.x)/16);x++)
    for(let z=Math.floor(Math.min(a.z,b.z)/16);z<=Math.floor(Math.max(a.z,b.z)/16);z++){
@@ -44,26 +63,35 @@ class RiverMap{
     for(const item of buckets.get(x+':'+z)||[])entries.add(item);
   return entries;
  }
- node(channel,x,z,endpoint){
+ node(channel,x,z){
   const key=x+':'+z,found=channel.nodes.get(key);
   if(found)return found;
-  const node={x,z,links:new Map(),downstream:null,toMouth:Infinity,endpoint};
+  const node={x,z,links:new Map(),downstream:null,toMouth:Infinity};
   channel.nodes.set(key,node);
   return node;
  }
- traceOutlet(channel){
-  const nodes=[...channel.nodes.values()],grid=new Map();
-  for(const node of nodes)this.index(grid,node,node,node);
-  let root=null,nearest=Infinity;
-  for(const node of nodes){
-   if(node.endpoint){
-    // Centerlines can end a short distance from their receiving river or the next reservoir section.
-    for(const other of this.nearby(grid,node,node,2.4)){
-     const distance=this.distance(node,other);
-     if(!distance||distance>2.4||node.links.has(other))continue;
-     node.links.set(other,distance);other.links.set(node,distance);
-    }
+ stitchJunctions(channel){
+  const connectors=[];
+  for(const {name,system,rank,path} of channel.paths)for(const end of [path[0],path.at(-1)]){
+   if([...end.links].some(([node])=>!path.includes(node)))continue;
+   let best=null,gap=2.4;
+   for(const segment of this.nearby(channel.grid,end,end,gap)){
+    if(segment.path===path||segment.a===end||segment.b===end)continue;
+    const hit=this.project(end,segment.a,segment.b),distance=this.distance(end,hit);
+    if(distance>=gap)continue;
+    best={...hit,segment};gap=distance;
    }
+   if(!best)continue;
+   const {a,b}=best.segment,node=best.t===0?a:best.t===1?b:this.node(channel,best.x,best.z);
+   this.link(node,a);this.link(node,b);
+   this.link(end,node);
+   if(gap>1e-5)connectors.push({name,system,rank,path:[end,node]});
+  }
+  channel.paths.push(...connectors);
+ }
+ traceOutlet(channel){
+  let root=null,nearest=Infinity;
+  for(const node of channel.nodes.values()){
    const gap=this.distance(node,channel.mouth);
    if(gap<nearest){nearest=gap;root=node}
   }
@@ -98,14 +126,18 @@ class RiverMap{
   return best;
  }
  channelAt(point,reach=2.4){
-  return this.nearest(point,reach,s=>s.system>=0&&Number.isFinite(s.a.toMouth)&&Number.isFinite(s.b.toMouth));
+  return this.nearest(point,reach,s=>this.systems[s.system].sea!==null);
  }
  offshoreAt({x,z}){
   return this.seas.some(({left,right,top,bottom,rings})=>x>=left&&x<=right&&z>=top&&z<=bottom
    &&inRing(x,z,rings[0])&&!rings.slice(1).some(ring=>inRing(x,z,ring)));
  }
- addOpening(system,path){
-  for(let i=1;i<path.length;i++)this.index(this.openingBuckets,path[i-1],path[i],{system,path,i});
+ addOpening(system,path,name,width){
+  for(let i=1;i<path.length;i++){
+   const a=path[i-1],b=path[i];
+   if(this.distance(a,b)<=.001)continue;
+   this.index(this.openingBuckets,a,b,{a,b,system,path,i,name,width});
+  }
  }
  openingAt(point){
   let result=null,gap=2.4;
@@ -143,7 +175,8 @@ class RiverMap{
    const length=this.distance(a,b);
    if(!length)continue;
    const ux=(b.x-a.x)/length,uz=(b.z-a.z)/length;
-   for(const segment of this.nearby(this.buckets,a,b)){
+   for(const segment of [...this.nearby(this.buckets,a,b),...this.nearby(this.openingBuckets,a,b)]){
+    if(this.systems[segment.system].sea===null)continue;
     const p=this.intersection(a,b,segment.a,segment.b);
     if(!p||!isLand(p)||this.bridgeAt(p))continue;
     const half=Math.min(7,segment.width/p.sine+1.15);

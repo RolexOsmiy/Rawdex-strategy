@@ -32,6 +32,10 @@ async function startMapGraphics(){
    if(!response.ok)throw Error('Не удалось загрузить материалы карты.');
    return response.json();
   })]);
+ installRiverSurface(shaders);
+ installModelMaterials(shaders);
+ installPoliticalBorders(shaders);
+ if(typeof warsawVisuals!=='undefined')warsawVisuals.apply(shaders);
  globalThis.gameShell?.progress(76,'Готовим графические шейдеры');
  // Прогрессивный запуск: сначала полное качество (MSAA 4x), затем без
  // сглаживания и со свежим адаптером — разовый сбой GPU-процесса
