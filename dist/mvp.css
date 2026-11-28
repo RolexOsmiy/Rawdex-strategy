@@ -142,7 +142,11 @@ body,dialog{-webkit-user-select:none;user-select:none}
 .atlas-vignette{background:radial-gradient(ellipse at 50% 46%,transparent 60%,#09171655 100%)}
 #diplomatic-atlas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
 #diplomatic-atlas[hidden]{display:none}
-#app.atlas-on-table :is(#labels,#army-layer,#battle-layer,#effects-layer,#order-ping){clip-path:var(--atlas-clip)}
+#app{background:#352218 url('maps/atlas/diplomatic-desk.webp') center/cover no-repeat}
+#app :is(#world,#vassal-border-layer,.atlas-vignette){clip-path:var(--map-sheet,none)}
+#app.atlas-on-table :is(#labels,#army-layer,#battle-layer,#effects-layer,#order-ping){clip-path:var(--map-sheet,none)}
+#map-paper-edge{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+#map-paper-edge path{fill:none;stroke:#c8a977;stroke-width:2;stroke-linejoin:round;filter:drop-shadow(0 2px 3px #140a06) drop-shadow(0 6px 10px #140a06ba)}
 #app :is(#labels,#army-layer){opacity:var(--atlas-label-opacity,1)}
 #app :is(#cargo-layer,#fleet-layer,#slot-markers,.atlas-vignette){opacity:var(--atlas-detail-opacity,1)}
 #app.diplomatic-map :is(#cargo-layer,#fleet-layer,#slot-markers){visibility:hidden}

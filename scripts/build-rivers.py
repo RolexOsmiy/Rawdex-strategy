@@ -7,13 +7,15 @@ import base64
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 import numpy as np
 import shapefile
 from scipy.ndimage import distance_transform_edt
 from shapely.geometry import LineString, Point, Polygon, box
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
+from shapely.validation import explain_validity
 
 root = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location("atlas_projection", root / "build-diplomatic-atlas.py")
@@ -53,7 +55,8 @@ SYSTEMS = {
 
 def parts(geometry):
     if geometry.geom_type == "LineString":
-        yield geometry
+        if not geometry.is_empty:
+            yield geometry
     elif hasattr(geometry, "geoms"):
         for part in geometry.geoms:
             yield from parts(part)
@@ -94,6 +97,79 @@ def backdrop(extent, transform, land_archive):
             "coast": base64.b64encode(pixels).decode("ascii")}
 
 
+def join_sheet(geometry, margin):
+    pieces = sorted(atlas.polygon_parts(geometry), key=lambda p: p.area, reverse=True)
+    sheet = pieces.pop(0)
+    while pieces:
+        other = min(pieces, key=sheet.distance)
+        pieces.remove(other)
+        link = LineString(nearest_points(sheet, other)).buffer(margin)
+        sheet = sheet.union(other).union(link)
+    return sheet
+
+
+def port_courses(directory, data):
+    parcels = atlas.read_constant(directory / "parcel-data.js", "PARCEL_DATA")
+    sites = [site for parcel in (parcels.values() if isinstance(parcels, dict) else parcels) for site in parcel["slots"]]
+    # Use the game's navigation graph so the coast of the sheet cannot cut a shipping route.
+    script = """
+const fs=require('node:fs'),vm=require('node:vm');
+const {data,sites}=JSON.parse(fs.readFileSync(0,'utf8'));
+const [RiverMap,reach]=vm.runInNewContext(fs.readFileSync('dist/rivers.js','utf8')+';[RiverMap,RIVER_PORT_REACH]');
+const map=new RiverMap(data);
+const courses=sites.flatMap(site=>{
+ const hit=map.channelAt(site,reach),course=hit&&map.downstream(hit,hit);
+ if(!course)return [];
+ const points=course.path.concat(map.systems[course.system].mouth);
+ return [points.map(({x,z})=>[x,z])];
+});
+process.stdout.write(JSON.stringify(courses));
+"""
+    result = subprocess.run(["node", "-e", script], cwd=atlas.DIST.parent,
+                            input=json.dumps({"data": data, "sites": sites}),
+                            capture_output=True, encoding="utf-8", check=True)
+    return unary_union([LineString(course) for course in json.loads(result.stdout) if len(course) > 1])
+
+
+def paper_outline(directory, extent, sea, courses):
+    regions = atlas.read_constant(directory / "map-data.js", "HISTORICAL_REGIONS")
+    provinces = [Polygon(p[0], p[1:]).buffer(0) for region in regions for p in region["polys"]]
+    if sea:
+        baltic = atlas.read_constant(atlas.DIST / "logic.js", "BALTIC")
+        water = [Polygon(baltic).intersection(box(0, 0, 784, 280)),
+                 *(Polygon(rings[0], rings[1:]).buffer(0) for rings in sea)]
+        margin, grain = 12, 4
+    else:
+        scenario = directory / "scenario.js"
+        bounds = atlas.read_constant(scenario, "MAP_SCENARIO")["bounds"]
+        coastline = atlas.read_constant(scenario, "SCENARIO_LAND")
+        land = unary_union([Polygon(p[0], p[1:]).buffer(0) for p in coastline])
+        water = list(atlas.polygon_parts(box(*bounds).difference(land)))
+        margin, grain = 20, 7
+
+    # Join detached islands and waterways to one sheet without filling distant corners.
+    shape = unary_union([*provinces, *water, courses]).buffer(margin)
+    sheet = join_sheet(shape, margin)
+    sheet = sheet.buffer(margin).buffer(-margin).intersection(box(*extent).buffer(-grain))
+    outer = max(atlas.polygon_parts(sheet), key=lambda p: p.area).exterior
+    line = LineString(outer).simplify(grain*.65)
+    count = max(3, round(line.length/grain))
+    ring = []
+    for i in range(count):
+        along = i*line.length/count
+        x, z = line.interpolate(along).coords[0]
+        x0, z0 = line.interpolate((along-grain*.5) % line.length).coords[0]
+        x1, z1 = line.interpolate((along+grain*.5) % line.length).coords[0]
+        dx, dz = x1-x0, z1-z0
+        length = max(.01, np.hypot(dx, dz))
+        tear = (np.sin(i*2.39)*.16 + np.sin(i*.57)*.15 + np.cos(i*1.49)*.065)*grain
+        ring.append([round(x-dz/length*tear, 2), round(z+dx/length*tear, 2)])
+    outline = join_sheet(Polygon(ring).buffer(0).union(unary_union(provinces).buffer(grain*.75)), margin)
+    if outline.geom_type != "Polygon" or not outline.is_valid or any(p.difference(outline).area > .001 for p in provinces):
+        raise ValueError(f"Paper outline does not enclose all provinces in {directory}: {outline.geom_type}, {explain_validity(outline)}")
+    return np.round(outline.exterior.coords[:-1], 2).tolist()
+
+
 def write_map(name, directory, transform, records, extent, land_archive, sea=None):
     systems = SYSTEMS[name]
     membership = {river: index for index, (_, _, rivers) in enumerate(systems) for river in rivers}
@@ -102,7 +178,7 @@ def write_map(name, directory, transform, records, extent, land_archive, sea=Non
              if record["featurecla"] == "River" and
              (record["scalerank"] <= 6 or record["name_en"] in membership or record["name_en"] in delta_channels)}
     x0, z0, x1, z1 = extent
-    limits = box(x0+4, z0+4, x1-4, z1-4)
+    navigable_limits = box(x0+4, z0+4, x1-4, z1-4)
     result = []
     for record, points in records:
         name_en = record["name_en"] or record["name"]
@@ -112,14 +188,22 @@ def write_map(name, directory, transform, records, extent, land_archive, sea=Non
             continue
         coords = np.asarray(points)
         xy = np.column_stack((coords, np.ones(len(coords)))) @ transform
-        geometries = parts(LineString(xy).intersection(limits).simplify(.34))
+        geometries = parts(LineString(xy).intersection(navigable_limits).simplify(.34))
         for line in geometries:
             if line.length < .6:
                 continue
             result.append([record["name_ru"] or name_en, membership.get(name_en, -1),
                            record["scalerank"], np.round(line.coords, 2).tolist()])
     outlets = [np.round(np.array([*mouth, 1]) @ transform, 2).tolist() for _, mouth, _ in systems]
-    data = {"lines": result, "mouths": outlets, "backdrop": backdrop(extent, transform, land_archive)}
+    data = {"lines": result, "mouths": outlets}
+    paper = paper_outline(directory, extent, sea, port_courses(directory, data))
+    limits = Polygon(paper).buffer(3)
+    data["lines"] = [[name, system, rank, coordinates]
+                     for name, system, rank, points in result
+                     for coordinates in ([points] if system >= 0 else
+                         [np.round(line.coords, 2).tolist() for line in parts(LineString(points).intersection(limits))])]
+    data["paper"] = paper
+    data["backdrop"] = backdrop(extent, transform, land_archive)
     if sea:
         data["sea"] = sea
     (directory / "river-data.js").write_text(

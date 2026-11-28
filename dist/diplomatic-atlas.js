@@ -12,6 +12,7 @@ class DiplomaticAtlas{
   this.context=canvas.getContext('2d');
   this.map=DIPLOMATIC_ATLAS_MAPS[map]||DIPLOMATIC_ATLAS_MAPS.baltic;
   this.extent=CAMPAIGN_RIVERS.backdrop.extent;
+  this.edge=document.querySelector("#map-paper-edge path");
   const boxes=regions.flatMap(region=>region.bounds);
   this.bounds=[Math.min(...boxes.map(b=>b[0])),Math.min(...boxes.map(b=>b[1])),
    Math.max(...boxes.map(b=>b[2])),Math.max(...boxes.map(b=>b[3]))];
@@ -31,8 +32,8 @@ class DiplomaticAtlas{
    image.onerror=reject;
    image.src='maps/atlas/diplomatic-'+name+'.webp?v='+globalThis.__gameScriptStamp;
   });
-  this.loaded=Promise.all([load('desk'),load(map)]).then(([desk,base])=>{
-   this.desk=desk;this.base=base;this.ready=!!this.context;
+  this.loaded=load(map).then(base=>{
+   this.base=base;this.ready=!!this.context;
    return this.ready;
   },()=>false);
  }
@@ -46,9 +47,20 @@ class DiplomaticAtlas{
   const x=x1-x0+42,z=z1-z0+42,c=Math.abs(Math.cos(yaw)),s=Math.abs(Math.sin(yaw));
   return 2/height*Math.min((area.right-area.left-26)/(c*x+s*z),(area.bottom-area.top-23)/(s*x+c*z));
  }
- contains(x,y,margin=0){
-  const a=this.area(this.canvas.clientWidth,this.canvas.clientHeight);
-  return x>=a.left+margin&&x<=a.right-margin&&y>=a.top+margin&&y<=a.bottom-margin;
+ contains(x,y){return !!this.sheetPoints&&inRing(x,y,this.sheetPoints)}
+ updateSheet(view){
+  if(this.sheetView===view||!view.width||!view.height)return;
+  this.sheetView=view;
+  this.sheetTerrain??=CAMPAIGN_RIVERS.paper.map(([x,z])=>[x,Math.max(-1,backgroundHeight(x,z)),z]);
+  const {width,height,x,z,c,s,scale,tilt,norm,opacity}=view,zoom=height*scale*.5;
+  this.sheetPoints=this.sheetTerrain.map(([px,y,pz])=>{
+   const dx=px-x,dz=pz-z;
+   return [width*.5+(c*dx-s*dz)*zoom,height*.5+((s*dx+c*dz)*tilt-y*(1-opacity))*zoom/norm];
+  });
+  const path='M'+this.sheetPoints.map(([x,y])=>x.toFixed(1)+' '+y.toFixed(1)).join(' L')+' Z';
+  this.sheet=new Path2D(path);
+  this.edge.setAttribute('d',path);
+  this.canvas.parentElement.style.setProperty('--map-sheet',`path("${path}")`);
  }
  prepareWoods(layers){
   const canopy=document.createElement('canvas');
@@ -74,36 +86,6 @@ class DiplomaticAtlas{
    else{this.woods=canopy;this.lastPaint=null}
   };
   requestIdleCallback(paintBatch,{timeout:160});
- }
- makePaper(width,height,ratio){
-  const paper=new Path2D(),points=[];
-  const a=this.area(width,height);
-  const corners=[[a.left,a.top],[a.right,a.top],[a.right,a.bottom],[a.left,a.bottom]];
-  for(let edge=0;edge<4;edge++){
-   const [x,y]=corners[edge],[nextX,nextY]=corners[(edge+1)%4];
-   const count=Math.max(1,Math.round(Math.hypot(nextX-x,nextY)/7));
-   for(let i=0;i<count;i++){
-    const t=i/count,seed=edge*37+i;
-    const grain=Math.sin(seed*127.1+9.7)*43758.5453;
-    const tear=((grain-Math.floor(grain)-.5)*5.2+Math.sin(seed*.37)*1.55)*Math.min(1,i/3,(count-i)/3);
-    points.push([x+(nextX-x)*t+(edge%2?tear:0),y+(nextY-y)*t+(edge%2?0:tear)]);
-   }
-  }
-  paper.moveTo(...points[0]);
-  for(const point of points.slice(1))paper.lineTo(...point);
-  paper.closePath();
-  this.canvas.parentElement.style.setProperty('--atlas-clip',`path("M${points.map(([x,y])=>x.toFixed(1)+' '+y.toFixed(1)).join(' L')} Z")`);
-  const backing=document.createElement('canvas');
-  backing.width=Math.round(width*ratio);backing.height=Math.round(height*ratio);
-  const ctx=backing.getContext('2d');
-  ctx.scale(ratio,ratio);
-  const zoom=Math.max(width/this.desk.width,height/this.desk.height);
-  const dw=this.desk.width*zoom,dh=this.desk.height*zoom;
-  ctx.drawImage(this.desk,(width-dw)*.5,(height-dh)*.5,dw,dh);
-  const shade=ctx.createRadialGradient(width*.48,height*.42,height*.18,width*.48,height*.42,Math.max(width,height)*.65);
-  shade.addColorStop(0,'rgba(38,26,19,.15)');shade.addColorStop(1,'rgba(16,10,8,.56)');
-  ctx.fillStyle=shade;ctx.fillRect(0,0,width,height);
-  return {paper,backing};
  }
  politics(regions,neighbors,colors){
   const signature=regions.map(r=>r.owner).join(',');
@@ -131,9 +113,8 @@ class DiplomaticAtlas{
   const ratio=Math.min(1.65,devicePixelRatio||1);
   const w=Math.round(width*ratio),h=Math.round(height*ratio);
   if(!w||!h)return;
-  if(!this.frame||this.canvas.width!==w||this.canvas.height!==h){
+  if(this.canvas.width!==w||this.canvas.height!==h){
    this.canvas.width=w;this.canvas.height=h;
-   this.frame=this.makePaper(width,height,ratio);
    this.lastPaint=null;
   }
   const paint=this.politics(regions,neighbors,colors);
@@ -142,24 +123,12 @@ class DiplomaticAtlas{
   this.lastPaint=key;this.lastRoutes=routes;
   const ctx=this.context;
   ctx.setTransform(1,0,0,1,0,0);
-  if(paper)ctx.drawImage(this.frame.backing,0,0);
+  ctx.clearRect(0,0,w,h);
   ctx.setTransform(ratio,0,0,ratio,0,0);
-  let sheet=this.frame.paper;
-  if(paper>0&&paper<1){
-   const a=this.area(width,height);
-   const outset=1-paper,left=(a.left+6)*outset,top=(a.top+6)*outset;
-   const sx=1+2*left/(a.right-a.left),sy=1+(a.top+height-a.bottom+12)*outset/(a.bottom-a.top);
-   sheet=new Path2D();
-   sheet.addPath(this.frame.paper,new DOMMatrix([sx,0,0,sy,a.left-left-a.left*sx,a.top-top-a.top*sy]));
-  }
-  ctx.fillStyle='#a69778';
-  if(paper){
-   ctx.shadowColor='rgba(18,11,8,.68)';ctx.shadowBlur=17*ratio;ctx.shadowOffsetY=6*ratio;
-   ctx.fill(sheet);
-   ctx.shadowColor='transparent';ctx.shadowBlur=0;ctx.shadowOffsetY=0;
-  }else ctx.fillRect(0,0,width,height);
   ctx.save();
-  if(paper)ctx.clip(sheet);
+  ctx.clip(this.sheet);
+  ctx.fillStyle='#a69778';
+  ctx.fill(this.sheet);
   const zoom=height*scale/2,vertical=zoom*tilt/norm,c=Math.cos(yaw),s=Math.sin(yaw);
   ctx.transform(c*zoom,s*vertical,-s*zoom,c*vertical,width*.5-zoom*(c*x-s*z),height*.5-vertical*(s*x+c*z));
   const [x0,z0,x1,z1]=this.extent,dw=x1-x0,dh=z1-z0;
@@ -197,12 +166,5 @@ class DiplomaticAtlas{
    stroke(path,'#B5CF77',1.65);
   }
   ctx.restore();
-  if(paper){
-   ctx.lineWidth=2.8;ctx.strokeStyle='rgba(86,67,43,.63)';ctx.stroke(sheet);
-   ctx.save();ctx.clip(sheet);
-   ctx.lineWidth=5.2;ctx.strokeStyle='rgba(224,200,154,.27)';ctx.stroke(sheet);
-   ctx.lineWidth=2.2;ctx.strokeStyle='rgba(234,213,170,.62)';ctx.stroke(sheet);
-   ctx.restore();
-  }
  }
 }

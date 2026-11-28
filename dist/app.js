@@ -2011,6 +2011,9 @@ function geometryForBuildings(){
 // Extend the same relief outside playable borders instead of a flat floor.
 // The sea remains below water level, so the water surface covers the seabed.
 const backdrop=CAMPAIGN_RIVERS.backdrop;
+const sheetPoints=CAMPAIGN_RIVERS.paper;
+const sheetBounds=[Math.min(...sheetPoints.map(p=>p[0])),Math.min(...sheetPoints.map(p=>p[1])),
+ Math.max(...sheetPoints.map(p=>p[0])),Math.max(...sheetPoints.map(p=>p[1]))];
 const backdropCoast=atob(backdrop.coast);
 function coastRelief(x,z){
  const {extent:[x0,z0,x1,z1],cols,rows}=backdrop;
@@ -2037,24 +2040,38 @@ function backgroundHeight(x,z){
  return -2.3+(surfaceHeight(x,z)+2.3)*atlasEase(Math.min(1,distance/11));
 }
 function createBasemap(){
- const land=[],sea=[],table=[],[x0,z0,x1,z1]=backdrop.extent,step=GAME_MAP?18:12;
- quad(table,[x0-900,-5,z0-900],[x1+900,-5,z0-900],[x1+900,-5,z1+900],[x0-900,-5,z1+900],[.07,.09,.10]);
+ const land=[],sea=[],step=GAME_MAP?18:12;
+ const [x0,z0,x1,z1]=sheetBounds.map((value,i)=>value+(i<2?-step:step));
  quad(sea,[x0,-1,z0],[x1,-1,z0],[x1,-1,z1],[x0,-1,z1],[.12,.23,.27]);
  const columns=Math.ceil((x1-x0)/step),rows=Math.ceil((z1-z0)/step);
+ const cellX=(x1-x0)/columns,cellZ=(z1-z0)/rows;
+ const spans=Array.from({length:rows},()=>[]);
+ for(let i=0;i<sheetPoints.length;i++){
+  const [ax,az]=sheetPoints[i],[bx,bz]=sheetPoints[(i+1)%sheetPoints.length];
+  for(let row=Math.floor((Math.min(az,bz)-z0)/cellZ);row<=Math.floor((Math.max(az,bz)-z0)/cellZ);row++){
+   spans[row].push([ax,az,bx,bz]);
+  }
+ }
  let previous=null;
  for(let row=0;row<=rows;row++){
   const z=z0+(z1-z0)*row/rows,current=[];
+  const midZ=z-cellZ*.5,edges=spans[row-1]||[];
+  const crossings=edges.filter(([,az,,bz])=>(az>midZ)!==(bz>midZ))
+   .map(([ax,az,bx,bz])=>ax+(bx-ax)*(midZ-az)/(bz-az));
   for(let col=0;col<=columns;col++){
    const x=x0+(x1-x0)*col/columns,y=backgroundHeight(x,z);
    current.push({point:[x,y,z],color:y<=-2.3?[.12,.23,.27]:landscapeColor(x,z)});
    if(!previous||!col)continue;
+   const midX=x-cellX*.5;
+   const inside=crossings.filter(at=>at>midX).length%2;
+   if(!inside&&!edges.some(([a,,b])=>Math.min(a,b)<=x&&Math.max(a,b)>=x-cellX))continue;
    const a=previous[col-1],b=previous[col],c=current[col],d=current[col-1];
    if([a,b,c,d].every(p=>p.point[1]<=-2.3))continue;
    for(const {point,color} of [a,b,c,a,c,d])vertex(land,...point,color);
   }
   previous=current;
  }
- return {land:makeBuffer(land),sea:makeBuffer(sea),table:makeBuffer(table)};
+ return {land:makeBuffer(land),sea:makeBuffer(sea)};
 }
 
 // Paint shadows in map coordinates, so the actual ground depth and slope never cut them.
@@ -2439,7 +2456,7 @@ function mapView(){
  const scale=baseScale*(1-(1-Math.min(1,fit/MIN_MAP_ZOOM))*fitBlend);
  const c=Math.cos(yaw),s=Math.sin(yaw),norm=Math.hypot(1,tilt);
  if(width&&height){
-  const [left,top,right,bottom]=backdrop.extent;
+  const [left,top,right,bottom]=sheetBounds;
   const halfAcross=width/(height*scale),halfDown=norm/(scale*tilt);
   const limit=(position,low,high,half)=>{
    const inset=Math.min((high-low)/2,half);
@@ -4564,6 +4581,7 @@ function prepareAtlasWoods(){
 }
 function paintDiplomaticMap(view){
  const {cartographic,opacity,paper,progress,atlasPitch}=view;
+ diplomaticAtlas.updateSheet(view);
  if(cartographic!==atlasVisible){
   atlasVisible=cartographic;
   $('app').classList.toggle('diplomatic-map',cartographic);
@@ -4621,7 +4639,7 @@ function draw(now=0){
  if(urbanPaint){gl.activeTexture(gl.TEXTURE0+11);gl.bindTexture(gl.TEXTURE_2D,urbanPaint.texture)}
  if(andalusiaAsset){gl.activeTexture(gl.TEXTURE0+3);gl.bindTexture(gl.TEXTURE_2D,andalusiaAsset.texture)}
  gl.activeTexture(gl.TEXTURE0+4);gl.bindTexture(gl.TEXTURE_2D,materialsAsset.texture);gl.uniform1i(loc.materialMap,4);gl.uniform1f(loc.materialsReady,materialsAsset.ready?(closeGroundAsset.ready?(paintedMaterials.ready&&habitatAsset.ready&&meadowBrushAsset.ready?3:2):1):0);
- gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(ATLAS_TILT_START-cam.scale)/(ATLAS_TILT_START-ATLAS_ENTER_ZOOM))),hasStencil=gl.getContextAttributes?.()?.stencil!==false;gl.uniform1f(loc.terrainDetail,-1);drawBuffer(basemap.table);gl.uniform1f(loc.terrainDetail,1);
+ gl.activeTexture(gl.TEXTURE0+5);gl.bindTexture(gl.TEXTURE_2D,shoreAsset.texture);gl.uniform1i(loc.shoreMap,5);gl.uniform1f(loc.shoreReady,shoreAsset.ready?1:0);gl.uniform1f(loc.textureReady,groundAsset.ready?1:0);gl.uniform1f(loc.waterReady,waterAsset.ready?1:0);gl.uniform1f(loc.time,now/1000);gl.uniform1f(loc.tintAmount,0);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1);const politicalColors=FACTION_COLORS,chartWeight=Math.max(0,Math.min(1,(ATLAS_TILT_START-cam.scale)/(ATLAS_TILT_START-ATLAS_ENTER_ZOOM))),hasStencil=gl.getContextAttributes?.()?.stencil!==false;
  if(hasStencil){gl.clearStencil(0);gl.stencilMask(255);gl.clear(gl.STENCIL_BUFFER_BIT);gl.enable(gl.STENCIL_TEST);gl.stencilFunc(gl.ALWAYS,1,255);gl.stencilOp(gl.KEEP,gl.KEEP,gl.REPLACE)}else{drawBuffer(basemap.land);gl.uniform1f(loc.terrainDetail,0);gl.uniform1f(loc.water,1);drawBuffer(basemap.sea);gl.uniform1f(loc.water,0);gl.uniform1f(loc.terrainDetail,1)}
  gl.activeTexture(gl.TEXTURE0+6);gl.bindTexture(gl.TEXTURE_2D,parcelIndexAsset.texture);gl.uniform1i(loc.parcelIndex,6);gl.activeTexture(gl.TEXTURE0+7);gl.bindTexture(gl.TEXTURE_2D,parcelStyleTexture);gl.uniform1i(loc.parcelStyle,7);gl.uniform2f(loc.parcelIndexSize,parcelIndexAsset.width,parcelIndexAsset.height);gl.uniform1f(loc.parcelIndexReady,parcelIndexAsset.ready?1:0);gl.uniform1f(loc.showPlotBorders,mode?1:0);
  const focus=ghostPlot||(!mode&&selectedBuilding?{slot:selectedBuilding.building.slotId,region:selectedBuilding.region.id}:null);
